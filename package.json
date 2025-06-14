@@ -12,8 +12,9 @@
     "typecheck": "tsc"
   },
   "dependencies": {
-    "ponder": "^0.11.16",
+    "@commander-js/extra-typings": "^14.0.0",
     "hono": "^4.5.0",
+    "ponder": "^0.11.16",
     "viem": "^2.21.3"
   },
   "devDependencies": {

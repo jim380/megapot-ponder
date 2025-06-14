@@ -1,6 +1,6 @@
 import { createConfig } from "ponder";
 
-import BaseJackpotAbi from "./abis/BaseJackpot.json";
+import { BaseJackpotAbi } from "./abis/BaseJackpot";
 
 export default createConfig({
   chains: {
