@@ -1,16 +1,16 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { createMockContext, MockPonderContext } from "../../test/mocks/context";
+import { createMockContext, MockPonderContext } from "../mocks/context";
 import {
   createUserTicketPurchaseEvent,
   createUserWinWithdrawalEvent,
   createUserReferralFeeWithdrawalEvent,
   createProtocolFeeWithdrawalEvent,
-} from "../../test/mocks/events";
-import { generateEventId } from "../utils/calculations";
-import { ZERO_ADDRESS } from "../utils/constants";
-import { getHandlers } from "../../test/mocks/ponder-registry";
+} from "../mocks/events";
+import { generateEventId } from "../../src/utils/calculations";
+import { ZERO_ADDRESS } from "../../src/utils/constants";
+import { getHandlers } from "../mocks/ponder-registry";
 
-import "./tickets";
+import "../../src/handlers/tickets";
 
 const handlers = getHandlers() as Record<string, Function>;
 

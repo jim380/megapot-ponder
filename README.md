@@ -176,6 +176,205 @@ The indexer tracks the following entities:
 - `pnpm test:coverage` - Run tests with coverage report
 - `pnpm test:ui` - Open Vitest UI
 
+## GraphQL API
+
+The indexer provides a GraphQL API at `http://localhost:42069` with auto-generated queries based on the database schema.
+
+### Example Queries
+
+#### 1. Get Users List
+```graphql
+{
+  userss(limit: 10) {
+    items {
+      id
+      totalTicketsPurchased
+      totalWinnings
+      totalReferralFees
+      winningsClaimable
+      referralFeesClaimable
+      isActive
+      isLP
+    }
+  }
+}
+```
+
+#### 2. Get Specific User
+```graphql
+{
+  users(id: "0xYourAddressHere") {
+    id
+    totalTicketsPurchased
+    totalWinnings
+    winningsClaimable
+    referralFeesClaimable
+    isLP
+    createdAt
+    updatedAt
+  }
+}
+```
+
+#### 3. Get Liquidity Providers
+```graphql
+{
+  liquidityProviderss(
+    limit: 20,
+    orderBy: "stake",
+    orderDirection: "desc"
+  ) {
+    items {
+      id
+      principal
+      stake
+      riskPercentage
+      isActive
+      totalFeesEarned
+      totalDeposited
+      lastActionAt
+    }
+  }
+}
+```
+
+#### 4. Get Recent Tickets
+```graphql
+{
+  ticketss(
+    limit: 10,
+    orderBy: "timestamp",
+    orderDirection: "desc"
+  ) {
+    items {
+      id
+      roundId
+      buyerAddress
+      recipientAddress
+      referrerAddress
+      ticketsPurchasedBps
+      purchasePrice
+      timestamp
+      blockNumber
+    }
+  }
+}
+```
+
+#### 5. Get Jackpot Rounds
+```graphql
+{
+  jackpotRoundss(limit: 5) {
+    items {
+      id
+      status
+      totalTicketsValue
+      jackpotAmount
+      ticketCountTotalBps
+      winnerAddress
+      startTime
+      endTime
+      lpFeesGenerated
+      referralFeesGenerated
+      protocolFeesGenerated
+    }
+  }
+}
+```
+
+#### 6. Get LP Actions History
+```graphql
+{
+  lpActionss(
+    limit: 20,
+    orderBy: "timestamp",
+    orderDirection: "desc"
+  ) {
+    items {
+      id
+      lpAddress
+      actionType
+      amount
+      riskPercentage
+      timestamp
+      transactionHash
+    }
+  }
+}
+```
+
+#### 7. Get Withdrawals
+```graphql
+{
+  withdrawalss(
+    limit: 10,
+    orderBy: "timestamp",
+    orderDirection: "desc"
+  ) {
+    items {
+      id
+      userAddress
+      amount
+      withdrawalType
+      transactionHash
+      timestamp
+    }
+  }
+}
+```
+
+#### 8. Check Indexing Status
+```graphql
+{
+  _meta {
+    status
+  }
+}
+```
+
+### Query Parameters
+
+All list queries support the following parameters:
+- `limit`: Number of items to return (pagination)
+- `orderBy`: Field name to sort by
+- `orderDirection`: Sort direction (`"asc"` or `"desc"`)
+- `where`: Filter conditions (varies by entity type)
+- `before`/`after`: Cursor-based pagination
+
+### Filter Examples
+
+#### Filter Active Liquidity Providers
+```graphql
+{
+  liquidityProviderss(
+    where: { isActive: true },
+    limit: 10
+  ) {
+    items {
+      id
+      principal
+      stake
+    }
+  }
+}
+```
+
+#### Filter Tickets by Round
+```graphql
+{
+  ticketss(
+    where: { roundId: "1" },
+    limit: 50
+  ) {
+    items {
+      id
+      buyerAddress
+      ticketsPurchasedBps
+    }
+  }
+}
+```
+
 ## Production Deployment
 
 For production deployment, see the deployment guide in `.ai/CURRENT-PLAN.md`.

@@ -1,5 +1,5 @@
 import { vi } from "vitest";
-import { mockDeep, DeepMockProxy } from "vitest-mock-extended";
+import { createMockDb } from "./db";
 
 export type MockDatabase = {
   User: {
@@ -66,7 +66,7 @@ export type MockDatabase = {
 };
 
 export type MockPonderContext = {
-  db: DeepMockProxy<MockDatabase>;
+  db: ReturnType<typeof createMockDb>;
   network: {
     name: string;
     chainId: number;
@@ -83,7 +83,7 @@ export type MockPonderContext = {
 };
 
 export const createMockContext = (): MockPonderContext => ({
-  db: mockDeep<MockDatabase>(),
+  db: createMockDb(),
   network: {
     name: "base",
     chainId: 8453,

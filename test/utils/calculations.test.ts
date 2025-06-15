@@ -5,13 +5,13 @@ import {
   calculateReferralFee,
   calculateLpFee,
   calculateUserPoolShare,
-} from "./calculations";
+} from "../../src/utils/calculations";
 import {
   PROTOCOL_FEE_BPS,
   REFERRAL_FEE_BPS,
   LP_FEE_BPS,
   USER_POOL_BPS,
-} from "./constants";
+} from "../../src/utils/constants";
 
 describe("generateEventId", () => {
   it("should generate a unique event ID from transaction hash and log index", () => {

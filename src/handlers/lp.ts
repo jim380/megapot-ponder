@@ -1,4 +1,5 @@
-import { ponder, type PonderEvent, type PonderContext } from "@/generated";
+import { ponder } from "ponder:registry";
+import type { PonderEvent, PonderContext } from "../generated/index";
 import { generateEventId } from "../utils/calculations";
 
 ponder.on(

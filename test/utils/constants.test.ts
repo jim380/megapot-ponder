@@ -7,7 +7,7 @@ import {
   ZERO_ADDRESS,
   PROTOCOL_ADDRESS,
   MEGAPOT_CONTRACT_ADDRESS,
-} from "./constants";
+} from "../../src/utils/constants";
 
 describe("Fee Constants", () => {
   it("should have valid fee percentages", () => {
