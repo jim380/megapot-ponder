@@ -1,11 +1,14 @@
 export const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 export const BASE_JACKPOT_ADDRESS =
   "0x26eb7396e72b8903746b0133f7692dd1fa86bc13";
+export const MEGAPOT_CONTRACT_ADDRESS = BASE_JACKPOT_ADDRESS;
+export const PROTOCOL_ADDRESS = "0x0000000000000000000000000000000000000001"; // TODO: Replace with actual protocol address
 
-export const LP_FEE_BPS = 400n; // 4%
+export const PROTOCOL_FEE_BPS = 500n; // 5%
 export const REFERRAL_FEE_BPS = 100n; // 1%
-export const PROTOCOL_FEE_BPS = 100n; // 1%
-export const TOTAL_FEE_BPS = LP_FEE_BPS + REFERRAL_FEE_BPS + PROTOCOL_FEE_BPS; // 6%
+export const LP_FEE_BPS = 1400n; // 14%
+export const USER_POOL_BPS = 8000n; // 80%
+export const TOTAL_FEE_BPS = PROTOCOL_FEE_BPS + REFERRAL_FEE_BPS + LP_FEE_BPS; // 20%
 
 export const BPS_DIVISOR = 10000n;
 export const USDC_DECIMALS = 6;

@@ -8,8 +8,14 @@
     "start": "ponder start",
     "db": "ponder db",
     "codegen": "ponder codegen",
-    "lint": "eslint .",
-    "typecheck": "tsc"
+    "lint": "eslint 'src/**/*.ts' --ignore-pattern '**/*.test.ts'",
+    "typecheck": "tsc",
+    "test": "vitest",
+    "test:ui": "vitest --ui",
+    "test:run": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "test:watch": "vitest --watch",
+    "test:unit": "vitest run src/utils/*.test.ts"
   },
   "dependencies": {
     "@commander-js/extra-typings": "^14.0.0",
@@ -19,9 +25,13 @@
   },
   "devDependencies": {
     "@types/node": "^20.9.0",
+    "@vitest/coverage-v8": "^3.2.3",
+    "@vitest/ui": "^3.2.3",
     "eslint": "^8.53.0",
     "eslint-config-ponder": "^0.11.16",
-    "typescript": "^5.2.2"
+    "typescript": "^5.2.2",
+    "vitest": "^3.2.3",
+    "vitest-mock-extended": "^3.1.0"
   },
   "engines": {
     "node": ">=18.14"

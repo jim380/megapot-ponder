@@ -15,8 +15,14 @@
     "lib": ["ES2022"],
     "target": "ES2022",
 
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"],
+      "@/generated": ["./generated/index"]
+    }
   },
   "include": ["./**/*.ts"],
-  "exclude": ["node_modules"]
+  "exclude": ["node_modules", "**/*.test.ts", "test/**/*"]
 }

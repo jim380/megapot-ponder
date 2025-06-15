@@ -3,6 +3,7 @@ import {
   LP_FEE_BPS,
   REFERRAL_FEE_BPS,
   PROTOCOL_FEE_BPS,
+  USER_POOL_BPS,
 } from "./constants";
 
 export function calculateTicketAmount(
@@ -47,4 +48,8 @@ export function calculateFees(amount: bigint): {
 
 export function generateEventId(txHash: string, logIndex: number): string {
   return `${txHash}-${logIndex}`;
+}
+
+export function calculateUserPoolShare(amount: bigint): bigint {
+  return (amount * USER_POOL_BPS) / BPS_DIVISOR;
 }
