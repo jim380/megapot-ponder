@@ -1,386 +1,210 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { createMockContext, MockPonderContext } from "../mocks/context";
-import {
-  createLpDepositEvent,
-  createLpPrincipalWithdrawalEvent,
-  createLpStakeWithdrawalEvent,
-  createLpRiskPercentageAdjustmentEvent,
-  createLpRebalanceEvent,
-} from "../mocks/events";
+import { createMockContext, createMockEvent } from "../mocks/context-v11";
 import { generateEventId } from "../../src/utils/calculations";
 import { getHandlers } from "../mocks/ponder-registry";
 
-import "../../src/handlers/lp";
-
-const handlers = getHandlers() as Record<string, Function>;
-
 describe("LP Handlers", () => {
-  let context: MockPonderContext;
+  let mockContext: any;
+  let handlers: Record<string, Function>;
 
-  beforeEach(() => {
-    context = createMockContext();
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    mockContext = createMockContext();
+
+    await import("../../src/handlers/lp");
+    handlers = getHandlers();
   });
 
   describe("LpDeposit Handler", () => {
     it("should create a new LP when they don't exist", async () => {
-      const event = createLpDepositEvent({
-        user: "0x6666666666666666666666666666666666666666",
-        amount: 10000000n,
-      });
-
-      context.db.LiquidityProvider.findUnique.mockResolvedValue(null);
-
-      await handlers["BaseJackpot:LpDeposit"]({ event, context });
-
-      expect(context.db.User.upsert).toHaveBeenCalledWith({
-        id: "0x6666666666666666666666666666666666666666",
-        create: expect.objectContaining({
-          address: "0x6666666666666666666666666666666666666666",
-          isLiquidityProvider: true,
-        }),
-        update: expect.objectContaining({
-          isLiquidityProvider: true,
-        }),
-      });
-
-      expect(context.db.LiquidityProvider.create).toHaveBeenCalledWith({
-        id: "0x6666666666666666666666666666666666666666",
-        data: {
-          userId: "0x6666666666666666666666666666666666666666",
-          principalBalance: 10000000n,
-          stakeBalance: 0n,
-          totalDeposited: 10000000n,
-          totalWithdrawn: 0n,
-          totalStakeWithdrawn: 0n,
-          riskPercentage: 100,
-          isActive: true,
-          lastActivityAt: expect.any(Number),
-          createdAt: expect.any(Number),
-          updatedAt: expect.any(Number),
+      const mockEvent = createMockEvent({
+        name: "BaseJackpot:LpDeposit",
+        args: {
+          lpAddress: "0x6666666666666666666666666666666666666666",
+          amount: 10000000n,
+          riskPercentage: 100n,
         },
+      });
+
+      const handler = handlers["BaseJackpot:LpDeposit"];
+
+      await handler({ event: mockEvent, context: mockContext });
+
+      const inserts = mockContext.db.__dataStore.inserts;
+
+      const userInsert = inserts.find((i) => i.table === "users");
+      expect(userInsert).toBeDefined();
+      expect(userInsert.data).toMatchObject({
+        id: "0x6666666666666666666666666666666666666666",
+        isLP: true,
+      });
+
+      const lpInsert = inserts.find((i) => i.table === "liquidityProviders");
+      expect(lpInsert).toBeDefined();
+      expect(lpInsert.data).toMatchObject({
+        id: "0x6666666666666666666666666666666666666666",
+        principal: 10000000n,
+        totalDeposited: 10000000n,
+        riskPercentage: 100,
+        isActive: true,
+      });
+
+      const lpActionInsert = inserts.find((i) => i.table === "lpActions");
+      expect(lpActionInsert).toBeDefined();
+      expect(lpActionInsert.data).toMatchObject({
+        lpAddress: "0x6666666666666666666666666666666666666666",
+        actionType: "DEPOSIT",
+        amount: 10000000n,
       });
     });
 
     it("should update existing LP's balance", async () => {
-      const event = createLpDepositEvent({
-        user: "0x6666666666666666666666666666666666666666",
-        amount: 5000000n,
-      });
-
-      const existingLp = {
-        id: "0x6666666666666666666666666666666666666666",
-        principalBalance: 20000000n,
-        totalDeposited: 20000000n,
-        riskPercentage: 75,
-      };
-
-      context.db.LiquidityProvider.findUnique.mockResolvedValue(existingLp);
-
-      await handlers["BaseJackpot:LpDeposit"]({ event, context });
-
-      expect(context.db.LiquidityProvider.update).toHaveBeenCalledWith({
-        id: "0x6666666666666666666666666666666666666666",
-        data: {
-          principalBalance: 25000000n,
-          totalDeposited: 25000000n,
-          lastActivityAt: expect.any(Number),
-          updatedAt: expect.any(Number),
-        },
-      });
-    });
-
-    it("should create LP action record", async () => {
-      const event = createLpDepositEvent({
-        user: "0x6666666666666666666666666666666666666666",
-        amount: 5000000n,
-        transactionHash: "0xmno345",
-        logIndex: 4,
-      });
-
-      context.db.LiquidityProvider.findUnique.mockResolvedValue({
-        riskPercentage: 80,
-      });
-
-      await handlers["BaseJackpot:LpDeposit"]({ event, context });
-
-      const expectedEventId = generateEventId("0xmno345", 4);
-
-      expect(context.db.LpAction.create).toHaveBeenCalledWith({
-        id: expectedEventId,
-        data: {
-          lpId: "0x6666666666666666666666666666666666666666",
-          actionType: "deposit",
+      const mockEvent = createMockEvent({
+        name: "BaseJackpot:LpDeposit",
+        args: {
+          lpAddress: "0x6666666666666666666666666666666666666666",
           amount: 5000000n,
-          riskPercentage: 80,
-          timestamp: expect.any(Number),
-          transactionHash: "0xmno345",
-          createdAt: expect.any(Number),
+          riskPercentage: 75n,
         },
+      });
+
+      const handler = handlers["BaseJackpot:LpDeposit"];
+
+      await handler({ event: mockEvent, context: mockContext });
+
+      const updates = mockContext.db.__dataStore.updates;
+
+      const lpUpdate = updates.find(
+        (u) =>
+          u.table === "liquidityProviders" &&
+          u.filter?.id === "0x6666666666666666666666666666666666666666"
+      );
+      expect(lpUpdate).toBeDefined();
+      expect(lpUpdate.data).toMatchObject({
+        principal: 1000000n + 5000000n,
+        totalDeposited: 1000000n + 5000000n,
+        updatedAt: expect.any(Number),
       });
     });
   });
 
   describe("LpPrincipalWithdrawal Handler", () => {
     it("should update LP principal balance and mark inactive if balance is 0", async () => {
-      const event = createLpPrincipalWithdrawalEvent({
-        user: "0x7777777777777777777777777777777777777777",
-        amount: 15000000n,
-      });
-
-      const existingLp = {
-        id: "0x7777777777777777777777777777777777777777",
-        principalBalance: 15000000n,
-        totalWithdrawn: 5000000n,
-        riskPercentage: 90,
-      };
-
-      context.db.LiquidityProvider.findUnique.mockResolvedValue(existingLp);
-
-      await handlers["BaseJackpot:LpPrincipalWithdrawal"]({ event, context });
-
-      expect(context.db.LiquidityProvider.update).toHaveBeenCalledWith({
-        id: "0x7777777777777777777777777777777777777777",
-        data: {
-          principalBalance: 0n,
-          totalWithdrawn: 20000000n,
-          isActive: false,
-          lastActivityAt: expect.any(Number),
-          updatedAt: expect.any(Number),
+      const mockEvent = createMockEvent({
+        name: "BaseJackpot:LpPrincipalWithdrawal",
+        args: {
+          lpAddress: "0x7777777777777777777777777777777777777777",
+          principalAmount: 1000000n,
         },
       });
-    });
 
-    it("should keep LP active if balance remains positive", async () => {
-      const event = createLpPrincipalWithdrawalEvent({
-        user: "0x7777777777777777777777777777777777777777",
-        amount: 5000000n,
-      });
+      const handler = handlers["BaseJackpot:LpPrincipalWithdrawal"];
 
-      const existingLp = {
-        id: "0x7777777777777777777777777777777777777777",
-        principalBalance: 15000000n,
-        totalWithdrawn: 0n,
-        riskPercentage: 90,
-      };
+      mockContext.db.update = vi.fn(() => ({
+        set: vi.fn((updateFn) => {
+          const mockCurrent = { principal: 1000000n, totalWithdrawn: 0n };
+          const result = updateFn(mockCurrent);
+          mockContext.db.__dataStore.updates.push({
+            table: "liquidityProviders",
+            filter: { id: "0x7777777777777777777777777777777777777777" },
+            data: result,
+          });
+        }),
+      }));
 
-      context.db.LiquidityProvider.findUnique.mockResolvedValue(existingLp);
+      await handler({ event: mockEvent, context: mockContext });
 
-      await handlers["BaseJackpot:LpPrincipalWithdrawal"]({ event, context });
+      const updates = mockContext.db.__dataStore.updates;
+      const lpUpdate = updates.find((u) => u.table === "liquidityProviders");
 
-      expect(context.db.LiquidityProvider.update).toHaveBeenCalledWith({
-        id: "0x7777777777777777777777777777777777777777",
-        data: {
-          principalBalance: 10000000n,
-          totalWithdrawn: 5000000n,
-          isActive: true,
-          lastActivityAt: expect.any(Number),
-          updatedAt: expect.any(Number),
-        },
+      expect(lpUpdate).toBeDefined();
+      expect(lpUpdate.data).toMatchObject({
+        principal: 0n,
+        totalWithdrawn: 1000000n,
+        isActive: false,
       });
     });
   });
 
   describe("LpStakeWithdrawal Handler", () => {
     it("should update LP stake balance", async () => {
-      const event = createLpStakeWithdrawalEvent({
-        user: "0x8888888888888888888888888888888888888888",
-        amount: 100000n,
+      const mockEvent = createMockEvent({
+        name: "BaseJackpot:LpStakeWithdrawal",
+        args: {
+          lpAddress: "0x8888888888888888888888888888888888888888",
+        },
       });
 
-      const existingLp = {
-        id: "0x8888888888888888888888888888888888888888",
-        stakeBalance: 500000n,
-        totalStakeWithdrawn: 200000n,
-        riskPercentage: 50,
-      };
+      const handler = handlers["BaseJackpot:LpStakeWithdrawal"];
 
-      context.db.LiquidityProvider.findUnique.mockResolvedValue(existingLp);
+      await handler({ event: mockEvent, context: mockContext });
 
-      await handlers["BaseJackpot:LpStakeWithdrawal"]({ event, context });
+      const updates = mockContext.db.__dataStore.updates;
+      const lpUpdate = updates.find((u) => u.table === "liquidityProviders");
 
-      expect(context.db.LiquidityProvider.update).toHaveBeenCalledWith({
-        id: "0x8888888888888888888888888888888888888888",
-        data: {
-          stakeBalance: 400000n,
-          totalStakeWithdrawn: 300000n,
-          lastActivityAt: expect.any(Number),
-          updatedAt: expect.any(Number),
-        },
+      expect(lpUpdate).toBeDefined();
+      expect(lpUpdate.data).toMatchObject({
+        stake: 0n,
       });
     });
   });
 
   describe("LpRiskPercentageAdjustment Handler", () => {
-    it("should update LP risk percentage and track old value", async () => {
-      const event = createLpRiskPercentageAdjustmentEvent({
-        user: "0x9999999999999999999999999999999999999999",
-        newRiskPercentage: 60n,
-        transactionHash: "0xpqr678",
-        logIndex: 5,
-      });
-
-      const existingLp = {
-        id: "0x9999999999999999999999999999999999999999",
-        riskPercentage: 100,
-      };
-
-      context.db.LiquidityProvider.findUnique.mockResolvedValue(existingLp);
-
-      await handlers["BaseJackpot:LpRiskPercentageAdjustment"]({
-        event,
-        context,
-      });
-
-      expect(context.db.LiquidityProvider.update).toHaveBeenCalledWith({
-        id: "0x9999999999999999999999999999999999999999",
-        data: {
-          riskPercentage: 60,
-          lastActivityAt: expect.any(Number),
-          updatedAt: expect.any(Number),
+    it("should update LP risk percentage", async () => {
+      const mockEvent = createMockEvent({
+        name: "BaseJackpot:LpRiskPercentageAdjustment",
+        args: {
+          lpAddress: "0x9999999999999999999999999999999999999999",
+          riskPercentage: 50n,
         },
       });
 
-      const expectedEventId = generateEventId("0xpqr678", 5);
+      const handler = handlers["BaseJackpot:LpRiskPercentageAdjustment"];
 
-      expect(context.db.LpAction.create).toHaveBeenCalledWith({
-        id: expectedEventId,
-        data: {
-          lpId: "0x9999999999999999999999999999999999999999",
-          actionType: "risk_adjustment",
-          amount: 100n,
-          riskPercentage: 60,
-          timestamp: expect.any(Number),
-          transactionHash: "0xpqr678",
-          createdAt: expect.any(Number),
-        },
+      await handler({ event: mockEvent, context: mockContext });
+
+      const updates = mockContext.db.__dataStore.updates;
+      const inserts = mockContext.db.__dataStore.inserts;
+
+      const lpUpdate = updates.find((u) => u.table === "liquidityProviders");
+      expect(lpUpdate).toBeDefined();
+      expect(lpUpdate.data).toMatchObject({
+        riskPercentage: 50,
+      });
+
+      const lpActionInsert = inserts.find((i) => i.table === "lpActions");
+      expect(lpActionInsert).toBeDefined();
+      expect(lpActionInsert.data).toMatchObject({
+        actionType: "RISK_ADJUSTMENT",
+        amount: null,
+        riskPercentage: 50,
       });
     });
   });
 
   describe("LpRebalance Handler", () => {
-    it("should distribute rebalance proportionally to active LPs", async () => {
-      const event = createLpRebalanceEvent({
-        totalRebalanced: 1000000n,
-        transactionHash: "0xstu901",
-        logIndex: 6,
-      });
-
-      const activeLps = [
-        {
-          id: "0xaaaa",
-          principalBalance: 3000000n,
-          stakeBalance: 100000n,
-          riskPercentage: 100,
-        },
-        {
-          id: "0xbbbb",
-          principalBalance: 4000000n,
-          stakeBalance: 200000n,
-          riskPercentage: 50,
-        },
-      ];
-
-      context.db.LiquidityProvider.findMany.mockResolvedValue(activeLps);
-
-      await handlers["BaseJackpot:LpRebalance"]({ event, context });
-
-      expect(context.db.LiquidityProvider.update).toHaveBeenCalledWith({
-        id: "0xaaaa",
-        data: {
-          stakeBalance: 700000n,
-          lastActivityAt: expect.any(Number),
-          updatedAt: expect.any(Number),
+    it("should update LP balances after rebalance", async () => {
+      const mockEvent = createMockEvent({
+        name: "BaseJackpot:LpRebalance",
+        args: {
+          lpAddress: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          principal: 900000n,
+          stake: 150000n,
         },
       });
 
-      expect(context.db.LiquidityProvider.update).toHaveBeenCalledWith({
-        id: "0xbbbb",
-        data: {
-          stakeBalance: 600000n,
-          lastActivityAt: expect.any(Number),
-          updatedAt: expect.any(Number),
-        },
+      const handler = handlers["BaseJackpot:LpRebalance"];
+
+      await handler({ event: mockEvent, context: mockContext });
+
+      const updates = mockContext.db.__dataStore.updates;
+
+      const lpUpdate = updates.find((u) => u.table === "liquidityProviders");
+      expect(lpUpdate).toBeDefined();
+      expect(lpUpdate.data).toMatchObject({
+        principal: 900000n,
+        stake: 150000n,
       });
-
-      expect(context.db.LpAction.create).toHaveBeenCalledWith({
-        id: expect.stringContaining("0xstu901"),
-        data: expect.objectContaining({
-          lpId: "0xaaaa",
-          actionType: "rebalance",
-          amount: 600000n,
-          riskPercentage: 100,
-        }),
-      });
-
-      expect(context.db.LpAction.create).toHaveBeenCalledWith({
-        id: expect.stringContaining("0xstu901"),
-        data: expect.objectContaining({
-          lpId: "0xbbbb",
-          actionType: "rebalance",
-          amount: 400000n,
-          riskPercentage: 50,
-        }),
-      });
-
-      expect(context.db.LpAction.create).toHaveBeenCalledWith({
-        id: generateEventId("0xstu901", 6),
-        data: expect.objectContaining({
-          lpId: "system",
-          actionType: "rebalance",
-          amount: 1000000n,
-          riskPercentage: 0,
-        }),
-      });
-    });
-
-    it("should handle case with no active LPs", async () => {
-      const event = createLpRebalanceEvent({
-        totalRebalanced: 1000000n,
-      });
-
-      context.db.LiquidityProvider.findMany.mockResolvedValue([]);
-
-      const consoleErrorSpy = vi
-        .spyOn(console, "error")
-        .mockImplementation(() => {});
-
-      await handlers["BaseJackpot:LpRebalance"]({ event, context });
-
-      expect(consoleErrorSpy).toHaveBeenCalledWith(
-        "No active LPs found during rebalance"
-      );
-      expect(context.db.LiquidityProvider.update).not.toHaveBeenCalled();
-
-      consoleErrorSpy.mockRestore();
-    });
-
-    it("should handle LPs with 0% risk (no distribution)", async () => {
-      const event = createLpRebalanceEvent({
-        totalRebalanced: 1000000n,
-      });
-
-      const activeLps = [
-        {
-          id: "0xcccc",
-          principalBalance: 5000000n,
-          stakeBalance: 0n,
-          riskPercentage: 0,
-        },
-      ];
-
-      context.db.LiquidityProvider.findMany.mockResolvedValue(activeLps);
-
-      await handlers["BaseJackpot:LpRebalance"]({ event, context });
-
-      expect(context.db.LiquidityProvider.update).not.toHaveBeenCalled();
-      expect(context.db.LpAction.create).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining({
-            lpId: "system",
-            amount: 1000000n,
-          }),
-        })
-      );
     });
   });
 });

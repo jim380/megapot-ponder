@@ -35,8 +35,9 @@ export const createLpDepositEvent = (overrides?: {
   return createMockEvent({
     name: "BaseJackpot:LpDeposit",
     args: {
-      user: overrides?.user || "0xcccccccccccccccccccccccccccccccccccccccc",
+      lpAddress: overrides?.user || "0xcccccccccccccccccccccccccccccccccccccccc",
       amount: overrides?.amount || 1000000n,
+      riskPercentage: 100n,
     },
     blockTimestamp: overrides?.blockTimestamp,
     transactionHash: overrides?.transactionHash,
@@ -54,8 +55,8 @@ export const createLpPrincipalWithdrawalEvent = (overrides?: {
   return createMockEvent({
     name: "BaseJackpot:LpPrincipalWithdrawal",
     args: {
-      user: overrides?.user || "0xcccccccccccccccccccccccccccccccccccccccc",
-      amount: overrides?.amount || 500000n,
+      lpAddress: overrides?.user || "0xcccccccccccccccccccccccccccccccccccccccc",
+      principalAmount: overrides?.amount || 500000n,
     },
     blockTimestamp: overrides?.blockTimestamp,
     transactionHash: overrides?.transactionHash,
@@ -65,7 +66,6 @@ export const createLpPrincipalWithdrawalEvent = (overrides?: {
 
 export const createLpStakeWithdrawalEvent = (overrides?: {
   user?: string;
-  amount?: bigint;
   blockTimestamp?: bigint;
   transactionHash?: `0x${string}`;
   logIndex?: number;
@@ -73,8 +73,7 @@ export const createLpStakeWithdrawalEvent = (overrides?: {
   return createMockEvent({
     name: "BaseJackpot:LpStakeWithdrawal",
     args: {
-      user: overrides?.user || "0xcccccccccccccccccccccccccccccccccccccccc",
-      amount: overrides?.amount || 50000n,
+      lpAddress: overrides?.user || "0xcccccccccccccccccccccccccccccccccccccccc",
     },
     blockTimestamp: overrides?.blockTimestamp,
     transactionHash: overrides?.transactionHash,
@@ -92,8 +91,8 @@ export const createLpRiskPercentageAdjustmentEvent = (overrides?: {
   return createMockEvent({
     name: "BaseJackpot:LpRiskPercentageAdjustment",
     args: {
-      user: overrides?.user || "0xcccccccccccccccccccccccccccccccccccccccc",
-      newRiskPercentage: overrides?.newRiskPercentage || 75n,
+      lpAddress: overrides?.user || "0xcccccccccccccccccccccccccccccccccccccccc",
+      riskPercentage: overrides?.newRiskPercentage || 75n,
     },
     blockTimestamp: overrides?.blockTimestamp,
     transactionHash: overrides?.transactionHash,
@@ -102,7 +101,9 @@ export const createLpRiskPercentageAdjustmentEvent = (overrides?: {
 };
 
 export const createLpRebalanceEvent = (overrides?: {
-  totalRebalanced?: bigint;
+  user?: string;
+  principal?: bigint;
+  stake?: bigint;
   blockTimestamp?: bigint;
   transactionHash?: `0x${string}`;
   logIndex?: number;
@@ -110,7 +111,9 @@ export const createLpRebalanceEvent = (overrides?: {
   return createMockEvent({
     name: "BaseJackpot:LpRebalance",
     args: {
-      totalRebalanced: overrides?.totalRebalanced || 100000n,
+      lpAddress: overrides?.user || "0xcccccccccccccccccccccccccccccccccccccccc",
+      principal: overrides?.principal || 1000000n,
+      stake: overrides?.stake || 100000n,
     },
     blockTimestamp: overrides?.blockTimestamp,
     transactionHash: overrides?.transactionHash,
@@ -166,6 +169,67 @@ export const createProtocolFeeWithdrawalEvent = (overrides?: {
     name: "BaseJackpot:ProtocolFeeWithdrawal",
     args: {
       amount: overrides?.amount || 50000n,
+    },
+    blockTimestamp: overrides?.blockTimestamp,
+    transactionHash: overrides?.transactionHash,
+    logIndex: overrides?.logIndex,
+  });
+};
+
+export const createJackpotRunRequestedEvent = (overrides?: {
+  user?: string;
+  blockTimestamp?: bigint;
+  transactionHash?: `0x${string}`;
+  logIndex?: number;
+}) => {
+  return createMockEvent({
+    name: "BaseJackpot:JackpotRunRequested",
+    args: {
+      user: overrides?.user || "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    },
+    blockTimestamp: overrides?.blockTimestamp,
+    transactionHash: overrides?.transactionHash,
+    logIndex: overrides?.logIndex,
+  });
+};
+
+export const createEntropyResultEvent = (overrides?: {
+  sequenceNumber?: bigint;
+  randomNumber?: `0x${string}`;
+  blockTimestamp?: bigint;
+  transactionHash?: `0x${string}`;
+  logIndex?: number;
+}) => {
+  return createMockEvent({
+    name: "BaseJackpot:EntropyResult",
+    args: {
+      sequenceNumber: overrides?.sequenceNumber || 12345n,
+      randomNumber: overrides?.randomNumber || "0xdeadbeef",
+    },
+    blockTimestamp: overrides?.blockTimestamp,
+    transactionHash: overrides?.transactionHash,
+    logIndex: overrides?.logIndex,
+  });
+};
+
+export const createJackpotRunEvent = (overrides?: {
+  time?: bigint;
+  winner?: string;
+  winningTicket?: bigint;
+  winAmount?: bigint;
+  ticketsPurchasedTotalBps?: bigint;
+  blockTimestamp?: bigint;
+  transactionHash?: `0x${string}`;
+  logIndex?: number;
+}) => {
+  return createMockEvent({
+    name: "BaseJackpot:JackpotRun",
+    args: {
+      time: overrides?.time || 1700000000n,
+      winner: overrides?.winner || "0xffffffffffffffffffffffffffffffffffffffff",
+      winningTicket: overrides?.winningTicket || 42n,
+      winAmount: overrides?.winAmount || 1000000n,
+      ticketsPurchasedTotalBps: overrides?.ticketsPurchasedTotalBps || 100000n,
     },
     blockTimestamp: overrides?.blockTimestamp,
     transactionHash: overrides?.transactionHash,

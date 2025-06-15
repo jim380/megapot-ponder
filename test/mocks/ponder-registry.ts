@@ -1,30 +1,29 @@
 import { vi } from "vitest";
+import { mockTables } from "./db-v11";
 
 const handlers: Record<string, Function> = {};
 
-export const ponder = {
+const mockPonder = {
   on: vi.fn((eventName: string, handler: Function) => {
     handlers[eventName] = handler;
   }),
+  __handlers: handlers,
 };
 
+(global as any).ponder = mockPonder;
+
+export const ponder = mockPonder;
 export const getHandlers = () => handlers;
 
-export const users = undefined;
-export const rounds = undefined;
-export const ticketPurchases = undefined;
-export const liquidityProviders = undefined;
-export const lpActions = undefined;
-export const winWithdrawals = undefined;
-export const referralFeeWithdrawals = undefined;
-export const protocolFeeWithdrawals = undefined;
-export const lpSnapshots = undefined;
-export const hourlyAggregations = undefined;
-
-export const tickets = undefined;
-export const jackpotRounds = undefined;
-export const withdrawals = undefined;
-export const feeDistributions = undefined;
-export const referrals = undefined;
-export const lpRoundSnapshots = undefined;
-export const hourlyStats = undefined;
+export const {
+  users,
+  liquidityProviders,
+  jackpotRounds,
+  tickets,
+  lpActions,
+  withdrawals,
+  feeDistributions,
+  referrals,
+  lpRoundSnapshots,
+  hourlyStats,
+} = mockTables;

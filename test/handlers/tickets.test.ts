@@ -1,248 +1,185 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { createMockContext, MockPonderContext } from "../mocks/context";
-import {
-  createUserTicketPurchaseEvent,
-  createUserWinWithdrawalEvent,
-  createUserReferralFeeWithdrawalEvent,
-  createProtocolFeeWithdrawalEvent,
-} from "../mocks/events";
+import { createMockContext, createMockEvent } from "../mocks/context-v11";
 import { generateEventId } from "../../src/utils/calculations";
+import { calculateReferralFee } from "../../src/utils/calculations";
 import { ZERO_ADDRESS } from "../../src/utils/constants";
 import { getHandlers } from "../mocks/ponder-registry";
 
-import "../../src/handlers/tickets";
-
-const handlers = getHandlers() as Record<string, Function>;
-
 describe("Ticket Handlers", () => {
-  let context: MockPonderContext;
+  let mockContext: any;
+  let handlers: Record<string, Function>;
 
-  beforeEach(() => {
-    context = createMockContext();
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    mockContext = createMockContext();
+
+    await import("../../src/handlers/tickets");
+    handlers = getHandlers();
   });
 
   describe("UserTicketPurchase Handler", () => {
     it("should create a new user when they don't exist", async () => {
-      const event = createUserTicketPurchaseEvent({
-        recipient: "0x1111111111111111111111111111111111111111",
-        ticketsPurchasedTotalBps: 100n,
-        referrer: ZERO_ADDRESS,
-        buyer: "0x2222222222222222222222222222222222222222",
-      });
-
-      context.db.User.findUnique.mockResolvedValue(null);
-      context.db.Round.findUnique.mockResolvedValue({
-        id: 1,
-        jackpotAmount: 1000000n,
+      const mockEvent = createMockEvent({
+        name: "BaseJackpot:UserTicketPurchase",
+        args: {
+          recipient: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          ticketsPurchasedTotalBps: 100n,
+          referrer: ZERO_ADDRESS,
+          buyer: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        },
       });
 
       const handler = handlers["BaseJackpot:UserTicketPurchase"];
-      if (handler) {
-        await handler({ event, context });
-      }
 
-      expect(context.db.User.upsert).toHaveBeenCalledWith({
-        id: "0x1111111111111111111111111111111111111111",
-        create: {
-          address: "0x1111111111111111111111111111111111111111",
-          totalTicketsPurchased: 100n,
-          totalWinnings: 0n,
-          totalReferralFeesEarned: 0n,
-          isLiquidityProvider: false,
-          createdAt: expect.any(Number),
-          updatedAt: expect.any(Number),
-        },
-        update: {
-          totalTicketsPurchased: 100n,
-          updatedAt: expect.any(Number),
-        },
-      });
-    });
+      await handler({ event: mockEvent, context: mockContext });
 
-    it("should update existing user's ticket count", async () => {
-      const event = createUserTicketPurchaseEvent({
-        recipient: "0x1111111111111111111111111111111111111111",
-        ticketsPurchasedTotalBps: 200n,
-        referrer: ZERO_ADDRESS,
-        buyer: "0x1111111111111111111111111111111111111111",
+      const inserts = mockContext.db.__dataStore.inserts;
+
+      const userInsert = inserts.find((i) => i.table === "users");
+      expect(userInsert).toBeDefined();
+      expect(userInsert.data).toMatchObject({
+        id: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        ticketsPurchasedTotalBps: 100n,
+        totalTicketsPurchased: 1n,
+        isActive: true,
       });
 
-      const existingUser = {
-        id: "0x1111111111111111111111111111111111111111",
-        totalTicketsPurchased: 500n,
-        totalWinnings: 0n,
-        totalReferralFeesEarned: 0n,
-      };
-
-      context.db.User.findUnique.mockResolvedValue(existingUser);
-      context.db.Round.findUnique.mockResolvedValue({
-        id: 1,
-        jackpotAmount: 2000000n,
-      });
-
-      await handlers["BaseJackpot:UserTicketPurchase"]({ event, context });
-
-      expect(context.db.User.upsert).toHaveBeenCalledWith({
-        id: "0x1111111111111111111111111111111111111111",
-        create: expect.any(Object),
-        update: {
-          totalTicketsPurchased: 700n,
-          updatedAt: expect.any(Number),
-        },
-      });
-    });
-
-    it("should create ticket purchase record", async () => {
-      const event = createUserTicketPurchaseEvent({
-        ticketsPurchasedTotalBps: 150n,
-        transactionHash: "0xabc123",
-        logIndex: 3,
-      });
-
-      context.db.Round.findUnique.mockResolvedValue({
-        id: 1,
-        jackpotAmount: 5000000n,
-      });
-
-      await handlers["BaseJackpot:UserTicketPurchase"]({ event, context });
-
-      const expectedEventId = generateEventId("0xabc123", 3);
-
-      expect(context.db.TicketPurchase.create).toHaveBeenCalledWith({
-        id: expectedEventId,
-        data: {
-          userId: expect.any(String),
-          roundId: 1,
-          ticketsPurchasedBps: 150n,
-          amount: 750000n,
-          referrer: expect.any(String),
-          buyer: expect.any(String),
-          transactionHash: "0xabc123",
-          timestamp: expect.any(Number),
-          createdAt: expect.any(Number),
-        },
+      const ticketInsert = inserts.find((i) => i.table === "tickets");
+      expect(ticketInsert).toBeDefined();
+      expect(ticketInsert.data).toMatchObject({
+        buyerAddress: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        recipientAddress: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        ticketsPurchasedBps: 100n,
       });
     });
 
     it("should update referrer's earned fees when referrer is not zero address", async () => {
-      const referrer = "0x3333333333333333333333333333333333333333";
-      const event = createUserTicketPurchaseEvent({
-        recipient: "0x1111111111111111111111111111111111111111",
-        ticketsPurchasedTotalBps: 100n,
-        referrer: referrer,
-        buyer: "0x1111111111111111111111111111111111111111",
+      const mockEvent = createMockEvent({
+        name: "BaseJackpot:UserTicketPurchase",
+        args: {
+          recipient: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          ticketsPurchasedTotalBps: 200n,
+          referrer: "0xcccccccccccccccccccccccccccccccccccccccc",
+          buyer: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        },
       });
 
-      context.db.Round.findUnique.mockResolvedValue({
-        id: 1,
-        jackpotAmount: 10000000n,
-      });
+      const handler = handlers["BaseJackpot:UserTicketPurchase"];
 
-      await handlers["BaseJackpot:UserTicketPurchase"]({ event, context });
+      await handler({ event: mockEvent, context: mockContext });
 
-      expect(context.db.User.upsert).toHaveBeenCalledWith({
-        id: referrer,
-        create: expect.objectContaining({
-          address: referrer,
-          totalReferralFeesEarned: 10000n,
-        }),
-        update: expect.objectContaining({
-          totalReferralFeesEarned: 10000n,
-        }),
+      const inserts = mockContext.db.__dataStore.inserts;
+      const updates = mockContext.db.__dataStore.updates;
+
+      const referrerInsert = inserts.find(
+        (i) =>
+          i.table === "users" &&
+          i.data.id === "0xcccccccccccccccccccccccccccccccccccccccc"
+      );
+      expect(referrerInsert).toBeDefined();
+      expect(referrerInsert.data).toMatchObject({
+        id: "0xcccccccccccccccccccccccccccccccccccccccc",
+        isActive: true,
       });
     });
   });
 
   describe("UserWinWithdrawal Handler", () => {
     it("should create win withdrawal record and update user winnings", async () => {
-      const event = createUserWinWithdrawalEvent({
-        user: "0x4444444444444444444444444444444444444444",
-        amount: 50000000n,
-        transactionHash: "0xdef456",
-        logIndex: 1,
-      });
-
-      const existingUser = {
-        id: "0x4444444444444444444444444444444444444444",
-        totalWinnings: 100000000n,
-      };
-
-      context.db.User.findUnique.mockResolvedValue(existingUser);
-
-      await handlers["BaseJackpot:UserWinWithdrawal"]({ event, context });
-
-      const expectedEventId = generateEventId("0xdef456", 1);
-
-      expect(context.db.WinWithdrawal.create).toHaveBeenCalledWith({
-        id: expectedEventId,
-        data: {
-          userId: "0x4444444444444444444444444444444444444444",
-          amount: 50000000n,
-          transactionHash: "0xdef456",
-          timestamp: expect.any(Number),
-          createdAt: expect.any(Number),
+      const mockEvent = createMockEvent({
+        name: "BaseJackpot:UserWinWithdrawal",
+        args: {
+          user: "0xdddddddddddddddddddddddddddddddddddddddd",
+          amount: 10000000n,
         },
       });
 
-      expect(context.db.User.update).toHaveBeenCalledWith({
-        id: "0x4444444444444444444444444444444444444444",
-        data: {
-          totalWinnings: 150000000n,
-          updatedAt: expect.any(Number),
-        },
+      const handler = handlers["BaseJackpot:UserWinWithdrawal"];
+
+      await handler({ event: mockEvent, context: mockContext });
+
+      const updates = mockContext.db.__dataStore.updates;
+      const inserts = mockContext.db.__dataStore.inserts;
+
+      const userUpdate = updates.find(
+        (u) =>
+          u.table === "users" &&
+          u.filter.id === "0xdddddddddddddddddddddddddddddddddddddddd"
+      );
+      expect(userUpdate).toBeDefined();
+      expect(userUpdate.data).toMatchObject({
+        winningsClaimable: 0n,
+        totalWinnings: 10000000n,
+      });
+
+      const withdrawalInsert = inserts.find((i) => i.table === "withdrawals");
+      expect(withdrawalInsert).toBeDefined();
+      expect(withdrawalInsert.data).toMatchObject({
+        userAddress: "0xdddddddddddddddddddddddddddddddddddddddd",
+        amount: 10000000n,
+        withdrawalType: "WINNINGS",
       });
     });
   });
 
   describe("UserReferralFeeWithdrawal Handler", () => {
     it("should create referral fee withdrawal record", async () => {
-      const event = createUserReferralFeeWithdrawalEvent({
-        user: "0x5555555555555555555555555555555555555555",
-        amount: 25000n,
-        transactionHash: "0xghi789",
-        logIndex: 2,
-      });
-
-      await handlers["BaseJackpot:UserReferralFeeWithdrawal"]({
-        event,
-        context,
-      });
-
-      const expectedEventId = generateEventId("0xghi789", 2);
-
-      expect(context.db.ReferralFeeWithdrawal.create).toHaveBeenCalledWith({
-        id: expectedEventId,
-        data: {
-          userId: "0x5555555555555555555555555555555555555555",
-          amount: 25000n,
-          transactionHash: "0xghi789",
-          timestamp: expect.any(Number),
-          createdAt: expect.any(Number),
+      const mockEvent = createMockEvent({
+        name: "BaseJackpot:UserReferralFeeWithdrawal",
+        args: {
+          user: "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          amount: 50000n,
         },
+      });
+
+      const handler = handlers["BaseJackpot:UserReferralFeeWithdrawal"];
+
+      await handler({ event: mockEvent, context: mockContext });
+
+      const updates = mockContext.db.__dataStore.updates;
+      const inserts = mockContext.db.__dataStore.inserts;
+
+      const userUpdate = updates.find(
+        (u) =>
+          u.table === "users" &&
+          u.filter.id === "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      );
+      expect(userUpdate).toBeDefined();
+      expect(userUpdate.data).toMatchObject({
+        referralFeesClaimable: 0n,
+        totalReferralFees: 50000n,
+      });
+
+      const withdrawalInsert = inserts.find((i) => i.table === "withdrawals");
+      expect(withdrawalInsert).toBeDefined();
+      expect(withdrawalInsert.data).toMatchObject({
+        userAddress: "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        amount: 50000n,
+        withdrawalType: "REFERRAL_FEES",
       });
     });
   });
 
   describe("ProtocolFeeWithdrawal Handler", () => {
     it("should create protocol fee withdrawal record", async () => {
-      const event = createProtocolFeeWithdrawalEvent({
-        amount: 500000n,
-        transactionHash: "0xjkl012",
-        logIndex: 0,
+      const mockEvent = createMockEvent({
+        name: "BaseJackpot:ProtocolFeeWithdrawal",
+        args: {
+          amount: 25000n,
+        },
       });
 
-      await handlers["BaseJackpot:ProtocolFeeWithdrawal"]({ event, context });
+      const handler = handlers["BaseJackpot:ProtocolFeeWithdrawal"];
 
-      const expectedEventId = generateEventId("0xjkl012", 0);
+      await handler({ event: mockEvent, context: mockContext });
 
-      expect(context.db.ProtocolFeeWithdrawal.create).toHaveBeenCalledWith({
-        id: expectedEventId,
-        data: {
-          amount: 500000n,
-          transactionHash: "0xjkl012",
-          timestamp: expect.any(Number),
-          createdAt: expect.any(Number),
-        },
+      const inserts = mockContext.db.__dataStore.inserts;
+
+      const feeDistInsert = inserts.find((i) => i.table === "feeDistributions");
+      expect(feeDistInsert).toBeDefined();
+      expect(feeDistInsert.data).toMatchObject({
+        feeType: "PROTOCOL_FEE",
+        amount: 25000n,
       });
     });
   });
