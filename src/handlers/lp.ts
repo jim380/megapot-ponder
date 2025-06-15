@@ -1,306 +1,248 @@
 import { ponder } from "ponder:registry";
-import type { PonderEvent, PonderContext } from "../generated/index";
+import {
+  users,
+  liquidityProviders,
+  lpActions,
+  lpRoundSnapshots,
+  jackpotRounds,
+} from "ponder:schema";
 import { generateEventId } from "../utils/calculations";
 
-ponder.on(
-  "BaseJackpot:LpDeposit",
-  async ({
-    event,
-    context,
-  }: {
-    event: PonderEvent;
-    context: PonderContext;
-  }) => {
-    const { amount, user } = event.args;
-    const timestamp = Number(event.block.timestamp);
-    const eventId = generateEventId(event.transaction.hash, event.log.logIndex);
-    const userAddress = user.toLowerCase();
+ponder.on("BaseJackpot:LpDeposit", async ({ event, context }) => {
+  const { lpAddress, amount, riskPercentage } = event.args;
+  const eventId = generateEventId(event.transaction.hash, event.log.logIndex);
+  const timestamp = Number(event.block.timestamp);
+  const lpId = lpAddress.toLowerCase();
 
-    await context.db.User.upsert({
-      id: userAddress,
-      create: {
-        address: userAddress,
-        isLiquidityProvider: true,
-        createdAt: timestamp,
-        updatedAt: timestamp,
-      },
-      update: {
-        isLiquidityProvider: true,
-        updatedAt: timestamp,
-      },
+  await context.db
+    .insert(users)
+    .values({
+      id: lpId,
+      ticketsPurchasedTotalBps: 0n,
+      winningsClaimable: 0n,
+      referralFeesClaimable: 0n,
+      totalTicketsPurchased: 0n,
+      totalWinnings: 0n,
+      totalReferralFees: 0n,
+      isActive: true,
+      isLP: true,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    })
+    .onConflictDoUpdate({
+      isLP: true,
+      isActive: true,
+      updatedAt: timestamp,
     });
 
-    const existingLp = await context.db.LiquidityProvider.findUnique({
-      id: userAddress,
-    });
+  await context.db
+    .insert(liquidityProviders)
+    .values({
+      id: lpId,
+      principal: amount,
+      stake: 0n,
+      riskPercentage: Number(riskPercentage),
+      isActive: true,
+      totalDeposited: amount,
+      totalWithdrawn: 0n,
+      totalFeesEarned: 0n,
+      lastActionAt: timestamp,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    })
+    .onConflictDoUpdate((current) => ({
+      principal: current.principal + amount,
+      totalDeposited: current.totalDeposited + amount,
+      riskPercentage: Number(riskPercentage),
+      isActive: true,
+      lastActionAt: timestamp,
+      updatedAt: timestamp,
+    }));
 
-    if (existingLp) {
-      await context.db.LiquidityProvider.update({
-        id: userAddress,
-        data: {
-          principalBalance: existingLp.principalBalance + amount,
-          totalDeposited: existingLp.totalDeposited + amount,
-          lastActivityAt: timestamp,
-          updatedAt: timestamp,
-        },
-      });
-    } else {
-      await context.db.LiquidityProvider.create({
-        id: userAddress,
-        data: {
-          userId: userAddress,
-          principalBalance: amount,
-          stakeBalance: 0n,
-          totalDeposited: amount,
-          totalWithdrawn: 0n,
-          totalStakeWithdrawn: 0n,
-          riskPercentage: 100,
-          isActive: true,
-          lastActivityAt: timestamp,
-          createdAt: timestamp,
-          updatedAt: timestamp,
-        },
-      });
-    }
+  const currentRound = await getCurrentRound(context, timestamp);
 
-    await context.db.LpAction.create({
-      id: eventId,
-      data: {
-        lpId: userAddress,
-        actionType: "deposit",
-        amount: amount,
-        riskPercentage: existingLp?.riskPercentage || 100,
-        timestamp: timestamp,
-        transactionHash: event.transaction.hash,
-        createdAt: timestamp,
-      },
-    });
-  }
-);
+  await context.db.insert(lpActions).values({
+    id: eventId,
+    lpAddress: lpId,
+    actionType: "DEPOSIT",
+    amount,
+    riskPercentage: Number(riskPercentage),
+    effectiveRoundId: currentRound ? String(currentRound.id) : null,
+    transactionHash: event.transaction.hash,
+    blockNumber: BigInt(event.block.number),
+    timestamp,
+  });
+});
 
-ponder.on(
-  "BaseJackpot:LpPrincipalWithdrawal",
-  async ({
-    event,
-    context,
-  }: {
-    event: PonderEvent;
-    context: PonderContext;
-  }) => {
-    const { amount, user } = event.args;
-    const timestamp = Number(event.block.timestamp);
-    const eventId = generateEventId(event.transaction.hash, event.log.logIndex);
-    const userAddress = user.toLowerCase();
+ponder.on("BaseJackpot:LpPrincipalWithdrawal", async ({ event, context }) => {
+  const { lpAddress, principalAmount } = event.args;
+  const eventId = generateEventId(event.transaction.hash, event.log.logIndex);
+  const timestamp = Number(event.block.timestamp);
+  const lpId = lpAddress.toLowerCase();
 
-    const lp = await context.db.LiquidityProvider.findUnique({
-      id: userAddress,
-    });
+  await context.db.update(liquidityProviders, { id: lpId }).set((current) => ({
+    principal:
+      current.principal > principalAmount
+        ? current.principal - principalAmount
+        : 0n,
+    totalWithdrawn: current.totalWithdrawn + principalAmount,
+    isActive: current.principal - principalAmount > 0n,
+    lastActionAt: timestamp,
+    updatedAt: timestamp,
+  }));
 
-    if (!lp) {
-      console.error(`LP not found for principal withdrawal: ${userAddress}`);
-      return;
-    }
+  const currentRound = await getCurrentRound(context, timestamp);
 
-    await context.db.LiquidityProvider.update({
-      id: userAddress,
-      data: {
-        principalBalance: lp.principalBalance - amount,
-        totalWithdrawn: lp.totalWithdrawn + amount,
-        isActive: lp.principalBalance - amount > 0n,
-        lastActivityAt: timestamp,
-        updatedAt: timestamp,
-      },
-    });
+  await context.db.insert(lpActions).values({
+    id: eventId,
+    lpAddress: lpId,
+    actionType: "WITHDRAWAL",
+    amount: principalAmount,
+    riskPercentage: null,
+    effectiveRoundId: currentRound ? String(currentRound.id) : null,
+    transactionHash: event.transaction.hash,
+    blockNumber: BigInt(event.block.number),
+    timestamp,
+  });
+});
 
-    await context.db.LpAction.create({
-      id: eventId,
-      data: {
-        lpId: userAddress,
-        actionType: "principal_withdrawal",
-        amount: amount,
-        riskPercentage: lp.riskPercentage,
-        timestamp: timestamp,
-        transactionHash: event.transaction.hash,
-        createdAt: timestamp,
-      },
-    });
-  }
-);
+ponder.on("BaseJackpot:LpStakeWithdrawal", async ({ event, context }) => {
+  const { lpAddress } = event.args;
+  const eventId = generateEventId(event.transaction.hash, event.log.logIndex);
+  const timestamp = Number(event.block.timestamp);
+  const lpId = lpAddress.toLowerCase();
 
-ponder.on(
-  "BaseJackpot:LpStakeWithdrawal",
-  async ({
-    event,
-    context,
-  }: {
-    event: PonderEvent;
-    context: PonderContext;
-  }) => {
-    const { amount, user } = event.args;
-    const timestamp = Number(event.block.timestamp);
-    const eventId = generateEventId(event.transaction.hash, event.log.logIndex);
-    const userAddress = user.toLowerCase();
+  const stakeAmount = 0n;
 
-    const lp = await context.db.LiquidityProvider.findUnique({
-      id: userAddress,
-    });
+  await context.db.update(liquidityProviders, { id: lpId }).set((current) => ({
+    stake: 0n,
+    totalFeesEarned: current.totalFeesEarned + current.stake,
+    lastActionAt: timestamp,
+    updatedAt: timestamp,
+  }));
 
-    if (!lp) {
-      console.error(`LP not found for stake withdrawal: ${userAddress}`);
-      return;
-    }
+  const currentRound = await getCurrentRound(context, timestamp);
 
-    await context.db.LiquidityProvider.update({
-      id: userAddress,
-      data: {
-        stakeBalance: lp.stakeBalance - amount,
-        totalStakeWithdrawn: lp.totalStakeWithdrawn + amount,
-        lastActivityAt: timestamp,
-        updatedAt: timestamp,
-      },
-    });
-
-    await context.db.LpAction.create({
-      id: eventId,
-      data: {
-        lpId: userAddress,
-        actionType: "stake_withdrawal",
-        amount: amount,
-        riskPercentage: lp.riskPercentage,
-        timestamp: timestamp,
-        transactionHash: event.transaction.hash,
-        createdAt: timestamp,
-      },
-    });
-  }
-);
+  await context.db.insert(lpActions).values({
+    id: eventId,
+    lpAddress: lpId,
+    actionType: "WITHDRAWAL",
+    amount: stakeAmount,
+    riskPercentage: null,
+    effectiveRoundId: currentRound ? String(currentRound.id) : null,
+    transactionHash: event.transaction.hash,
+    blockNumber: BigInt(event.block.number),
+    timestamp,
+  });
+});
 
 ponder.on(
   "BaseJackpot:LpRiskPercentageAdjustment",
-  async ({
-    event,
-    context,
-  }: {
-    event: PonderEvent;
-    context: PonderContext;
-  }) => {
-    const { newRiskPercentage, user } = event.args;
-    const timestamp = Number(event.block.timestamp);
+  async ({ event, context }) => {
+    const { lpAddress, riskPercentage } = event.args;
     const eventId = generateEventId(event.transaction.hash, event.log.logIndex);
-    const userAddress = user.toLowerCase();
+    const timestamp = Number(event.block.timestamp);
+    const lpId = lpAddress.toLowerCase();
 
-    const lp = await context.db.LiquidityProvider.findUnique({
-      id: userAddress,
+    await context.db.update(liquidityProviders, { id: lpId }).set({
+      riskPercentage: Number(riskPercentage),
+      lastActionAt: timestamp,
+      updatedAt: timestamp,
     });
 
-    if (!lp) {
-      console.error(`LP not found for risk adjustment: ${userAddress}`);
-      return;
-    }
+    const currentRound = await getCurrentRound(context, timestamp);
 
-    const oldRiskPercentage = lp.riskPercentage;
+    await context.db.insert(lpActions).values({
+      id: eventId,
+      lpAddress: lpId,
+      actionType: "RISK_ADJUSTMENT",
+      amount: null,
+      riskPercentage: Number(riskPercentage),
+      effectiveRoundId: currentRound ? String(currentRound.id) : null,
+      transactionHash: event.transaction.hash,
+      blockNumber: BigInt(event.block.number),
+      timestamp,
+    });
+  }
+);
 
-    await context.db.LiquidityProvider.update({
-      id: userAddress,
-      data: {
-        riskPercentage: Number(newRiskPercentage),
-        lastActivityAt: timestamp,
+ponder.on("BaseJackpot:LpRebalance", async ({ event, context }) => {
+  const { lpAddress, principal, stake } = event.args;
+  const eventId = generateEventId(event.transaction.hash, event.log.logIndex);
+  const timestamp = Number(event.block.timestamp);
+  const lpId = lpAddress.toLowerCase();
+
+  await context.db.update(liquidityProviders, { id: lpId }).set({
+    principal,
+    stake,
+    lastActionAt: timestamp,
+    updatedAt: timestamp,
+  });
+
+  const currentRound = await getCurrentRound(context, timestamp);
+
+  if (currentRound) {
+    const snapshotId = `${lpId}-${currentRound.id}`;
+    await context.db
+      .insert(lpRoundSnapshots)
+      .values({
+        id: snapshotId,
+        lpAddress: lpId,
+        roundId: String(currentRound.id),
+        beginningPrincipal: 0n,
+        beginningStake: 0n,
+        endingPrincipal: principal,
+        endingStake: stake,
+        activeRiskPercentage: 100,
+        feesEarned: 0n,
+        profitLoss: 0n,
+        createdAt: timestamp,
+      })
+      .onConflictDoUpdate({
+        endingPrincipal: principal,
+        endingStake: stake,
+      });
+  }
+
+  await context.db.insert(lpActions).values({
+    id: eventId,
+    lpAddress: lpId,
+    actionType: "RISK_ADJUSTMENT",
+    amount: stake,
+    riskPercentage: null,
+    effectiveRoundId: currentRound ? String(currentRound.id) : null,
+    transactionHash: event.transaction.hash,
+    blockNumber: BigInt(event.block.number),
+    timestamp,
+  });
+});
+
+async function getCurrentRound(context: any, timestamp: number): Promise<any> {
+  const roundId = 1;
+
+  try {
+    await context.db
+      .insert(jackpotRounds)
+      .values({
+        id: String(roundId),
+        startTime: timestamp,
+        endTime: 0,
+        status: "ACTIVE",
+        totalTicketsValue: 0n,
+        totalLpSupplied: 0n,
+        jackpotAmount: 0n,
+        ticketCountTotalBps: 0n,
+        randomNumber: null,
+        winnerAddress: null,
+        winningTicketNumber: null,
+        lpFeesGenerated: 0n,
+        referralFeesGenerated: 0n,
+        protocolFeesGenerated: 0n,
+        createdAt: timestamp,
         updatedAt: timestamp,
-      },
-    });
+      })
+      .onConflictDoNothing();
+  } catch (e) {}
 
-    await context.db.LpAction.create({
-      id: eventId,
-      data: {
-        lpId: userAddress,
-        actionType: "risk_adjustment",
-        amount: BigInt(oldRiskPercentage),
-        riskPercentage: Number(newRiskPercentage),
-        timestamp: timestamp,
-        transactionHash: event.transaction.hash,
-        createdAt: timestamp,
-      },
-    });
-  }
-);
-
-ponder.on(
-  "BaseJackpot:LpRebalance",
-  async ({
-    event,
-    context,
-  }: {
-    event: PonderEvent;
-    context: PonderContext;
-  }) => {
-    const { totalRebalanced } = event.args;
-    const timestamp = Number(event.block.timestamp);
-    const eventId = generateEventId(event.transaction.hash, event.log.logIndex);
-
-    const activeLps = await context.db.LiquidityProvider.findMany({
-      where: {
-        isActive: true,
-        principalBalance: { gt: 0n },
-      },
-    });
-
-    if (activeLps.length === 0) {
-      console.error("No active LPs found during rebalance");
-      return;
-    }
-
-    let totalPrincipalAtRisk = 0n;
-    for (const lp of activeLps) {
-      const principalAtRisk =
-        (lp.principalBalance * BigInt(lp.riskPercentage)) / 100n;
-      totalPrincipalAtRisk += principalAtRisk;
-    }
-
-    for (const lp of activeLps) {
-      const principalAtRisk =
-        (lp.principalBalance * BigInt(lp.riskPercentage)) / 100n;
-
-      const lpShare =
-        totalPrincipalAtRisk > 0n
-          ? (totalRebalanced * principalAtRisk) / totalPrincipalAtRisk
-          : 0n;
-
-      if (lpShare > 0n) {
-        await context.db.LiquidityProvider.update({
-          id: lp.id,
-          data: {
-            stakeBalance: lp.stakeBalance + lpShare,
-            lastActivityAt: timestamp,
-            updatedAt: timestamp,
-          },
-        });
-
-        await context.db.LpAction.create({
-          id: `${eventId}-${lp.id}`,
-          data: {
-            lpId: lp.id,
-            actionType: "rebalance",
-            amount: lpShare,
-            riskPercentage: lp.riskPercentage,
-            timestamp: timestamp,
-            transactionHash: event.transaction.hash,
-            createdAt: timestamp,
-          },
-        });
-      }
-    }
-
-    await context.db.LpAction.create({
-      id: eventId,
-      data: {
-        lpId: "system",
-        actionType: "rebalance",
-        amount: totalRebalanced,
-        riskPercentage: 0,
-        timestamp: timestamp,
-        transactionHash: event.transaction.hash,
-        createdAt: timestamp,
-      },
-    });
-  }
-);
+  return { id: roundId };
+}

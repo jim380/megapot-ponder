@@ -15,7 +15,10 @@
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest --watch",
-    "test:unit": "vitest run src/utils/*.test.ts"
+    "test:unit": "vitest run src/utils/*.test.ts",
+    "docker:start": "docker compose --env-file .env.local --profile tools build && docker compose --env-file .env.local --profile tools up -d",
+    "docker:stop": "docker compose --env-file .env.local --profile tools down",
+    "docker:clean": "docker compose --env-file .env.local --profile tools down -v"
   },
   "dependencies": {
     "@commander-js/extra-typings": "^14.0.0",

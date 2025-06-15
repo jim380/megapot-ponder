@@ -1,0 +1,76 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: megapot-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_INITDB_ARGS: "-E UTF8"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "${DB_PORT}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - megapot-network
+
+  ponder:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: megapot-ponder
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PONDER_DB_KIND: postgres
+      DATABASE_URL: postgres://${DB_USER}:${DB_PASSWORD}@postgres:5432/${DB_NAME}
+      DATABASE_SCHEMA: public
+      PONDER_RPC_URL_8453: ${PONDER_RPC_URL_8453}
+      PONDER_LOG_LEVEL: ${PONDER_LOG_LEVEL}
+      NODE_ENV: ${NODE_ENV}
+      NODE_OPTIONS: ${NODE_OPTIONS}
+    ports:
+      - "${PONDER_PORT}:42069"
+    volumes:
+      - ./src:/app/src:ro
+      - ./abis:/app/abis:ro
+      - ./ponder.config.ts:/app/ponder.config.ts:ro
+      - ./ponder.schema.ts:/app/ponder.schema.ts:ro
+    networks:
+      - megapot-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:42069/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 300s
+      retries: 3
+    command: ${PONDER_COMMAND:-pnpm start}
+
+  adminer:
+    image: adminer
+    container_name: megapot-adminer
+    restart: unless-stopped
+    environment:
+      ADMINER_DESIGN: dracula
+    ports:
+      - "${ADMINER_PORT}:8080"
+    networks:
+      - megapot-network
+    profiles:
+      - tools
+
+networks:
+  megapot-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+    driver: local

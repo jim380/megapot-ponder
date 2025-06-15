@@ -1,10 +1,11 @@
 # Megapot Ponder Indexer
 
-A blockchain indexer for Megapot's smart contracts built with [Ponder](https://ponder.sh/), providing real-time and historical data through a GraphQL API.
+A light weight indexer for Megapot's smart contracts built with [Ponder](https://ponder.sh/), providing real-time and historical data through a GraphQL API.
 
 ## Overview
 
 This indexer tracks all lottery activities on the Megapot platform including:
+
 - Ticket purchases and lottery rounds
 - Liquidity provider operations
 - Jackpot distributions
@@ -15,118 +16,101 @@ This indexer tracks all lottery activities on the Megapot platform including:
 
 - Node.js 18.14 or higher
 - pnpm (recommended) or npm
-- An Alchemy API key for Base network
+- RPC API key
+- Docker and Docker Compose (optional)
+- PostgreSQL (optional)
 
-## Installation
+## Getting Started
+
+### Option 1: Local Development
 
 1. Clone the repository:
+
 ```bash
 git clone <repository-url>
 cd megapot-ponder
 ```
 
 2. Install dependencies:
+
 ```bash
 pnpm install
-# or
-npm install
 ```
 
 3. Set up environment variables:
+
 ```bash
 cp .env.example .env.local
 ```
 
-Edit `.env.local` and add your Alchemy API key:
+4. Edit `.env.local` and add your Alchemy API key:
+
 ```
 PONDER_RPC_URL_8453=https://base-mainnet.g.alchemy.com/v2/YOUR_API_KEY
 ```
 
-## Development
+> **Note:** For local development, the indexer will automatically use SQLite (pglite) as the database. If you want to use PostgreSQL instead, set the `DATABASE_URL` environment variable in your `.env.local` file.
 
-### Running the Indexer
+5. Start the development server:
 
-Start the development server with hot reloading:
 ```bash
 pnpm dev
-# or
-npm run dev
 ```
 
-The GraphQL playground will be available at http://localhost:42069/graphql
+The indexer will create a local SQLite database in `./.ponder/pglite/` for development use.
 
-### Building
+### Option 2: Docker Setup (Recommended for Production)
 
-#### TypeScript Type Checking
+1. Clone the repository and navigate to it:
 
-Run TypeScript compiler to check for type errors:
 ```bash
-pnpm typecheck
-# or
-npm run typecheck
+git clone <repository-url>
+cd megapot-ponder
 ```
 
-#### Code Generation
+2. Copy and configure environment:
 
-Generate TypeScript types from your schema:
 ```bash
-pnpm codegen
-# or
-npm run codegen
+cp .env.example .env
 ```
 
-### Linting
+3. Start with Docker Compose:
 
-Run ESLint to check code quality:
 ```bash
-pnpm lint
-# or
-npm run lint
+npm run docker:start
+
+# Or manually with docker compose
+docker compose --env-file .env.local up -d
+
+# Development mode (with hot reloading)
+PONDER_COMMAND="pnpm dev" NODE_ENV=development docker compose --env-file .env.local up -d
 ```
 
-### Testing
+The GraphQL playground will be available at http://localhost:42069
 
-#### Run All Tests
+### Database Configuration
+
+The indexer uses an explicit `PONDER_DB_KIND` environment variable to select the database:
+
+#### SQLite/pglite
+
 ```bash
-pnpm test
-# or
-npm test
+# Option 1: Leave PONDER_DB_KIND unset (defaults to pglite)
+# Option 2: Explicitly set it
+PONDER_DB_KIND=pglite
+
+# Optionally customize the data directory
+PGLITE_DIRECTORY=./.ponder/custom-db
 ```
 
-#### Run Tests in Watch Mode
+#### PostgreSQL
+
 ```bash
-pnpm test:watch
-# or
-npm run test:watch
+PONDER_DB_KIND=postgres
+DATABASE_URL=postgres://user:password@localhost:5432/dbname
 ```
 
-#### Run Tests Once
-```bash
-pnpm test:run
-# or
-npm run test:run
-```
-
-#### Run Unit Tests Only
-```bash
-pnpm test:unit
-# or
-npm run test:unit
-```
-
-#### Run Tests with Coverage
-```bash
-pnpm test:coverage
-# or
-npm run test:coverage
-```
-
-#### View Test UI
-```bash
-pnpm test:ui
-# or
-npm run test:ui
-```
+**Note**: If `PONDER_DB_KIND=postgres` but `DATABASE_URL` is not set, the app will fail with a clear error message.
 
 ## Project Structure
 
@@ -143,6 +127,10 @@ megapot-ponder/
 │       ├── calculations.ts # Fee calculations
 │       └── constants.ts    # Contract addresses and constants
 ├── test/              # Test utilities and mocks
+├── scripts/           # Utility scripts (backup, etc.)
+├── docker compose.yml # Docker Compose configuration
+├── Dockerfile         # Docker image definition
+├── .dockerignore      # Docker build exclusions
 ├── ponder.config.ts   # Ponder configuration
 ├── ponder.schema.ts   # Database schema
 └── schema.graphql     # GraphQL API schema
@@ -151,30 +139,17 @@ megapot-ponder/
 ## Database Schema
 
 The indexer tracks the following entities:
-- `User` - User accounts and statistics
-- `Round` - Lottery rounds
-- `TicketPurchase` - Individual ticket purchases
-- `LiquidityProvider` - LP positions and balances
-- `LpAction` - LP deposit/withdrawal history
-- `WinWithdrawal` - Winner prize claims
-- `ReferralFeeWithdrawal` - Referral fee claims
-- `ProtocolFeeWithdrawal` - Protocol fee withdrawals
-- `LpSnapshot` - LP state snapshots per round
-- `HourlyAggregation` - Hourly statistics
 
-## Available Scripts
-
-- `pnpm dev` - Start development server
-- `pnpm start` - Start production server
-- `pnpm db` - Database management commands
-- `pnpm codegen` - Generate TypeScript types
-- `pnpm lint` - Run ESLint
-- `pnpm typecheck` - Run TypeScript type checking
-- `pnpm test` - Run tests in watch mode
-- `pnpm test:run` - Run tests once
-- `pnpm test:unit` - Run unit tests only
-- `pnpm test:coverage` - Run tests with coverage report
-- `pnpm test:ui` - Open Vitest UI
+- `users` - User accounts and statistics
+- `liquidityProviders` - LP positions and balances
+- `jackpotRounds` - Lottery rounds
+- `tickets` - Individual ticket purchases
+- `lpActions` - LP deposit/withdrawal/rebalance history
+- `lpRoundSnapshots` - LP state snapshots per round
+- `withdrawals` - All withdrawal types (winnings, referral fees, protocol fees)
+- `feeDistributions` - Fee distribution records
+- `referrals` - Referral relationships and earnings
+- `hourlyStats` - Hourly aggregated statistics
 
 ## GraphQL API
 
@@ -183,6 +158,7 @@ The indexer provides a GraphQL API at `http://localhost:42069` with auto-generat
 ### Example Queries
 
 #### 1. Get Users List
+
 ```graphql
 {
   userss(limit: 10) {
@@ -201,6 +177,7 @@ The indexer provides a GraphQL API at `http://localhost:42069` with auto-generat
 ```
 
 #### 2. Get Specific User
+
 ```graphql
 {
   users(id: "0xYourAddressHere") {
@@ -217,13 +194,10 @@ The indexer provides a GraphQL API at `http://localhost:42069` with auto-generat
 ```
 
 #### 3. Get Liquidity Providers
+
 ```graphql
 {
-  liquidityProviderss(
-    limit: 20,
-    orderBy: "stake",
-    orderDirection: "desc"
-  ) {
+  liquidityProviderss(limit: 20, orderBy: "stake", orderDirection: "desc") {
     items {
       id
       principal
@@ -239,13 +213,10 @@ The indexer provides a GraphQL API at `http://localhost:42069` with auto-generat
 ```
 
 #### 4. Get Recent Tickets
+
 ```graphql
 {
-  ticketss(
-    limit: 10,
-    orderBy: "timestamp",
-    orderDirection: "desc"
-  ) {
+  ticketss(limit: 10, orderBy: "timestamp", orderDirection: "desc") {
     items {
       id
       roundId
@@ -262,6 +233,7 @@ The indexer provides a GraphQL API at `http://localhost:42069` with auto-generat
 ```
 
 #### 5. Get Jackpot Rounds
+
 ```graphql
 {
   jackpotRoundss(limit: 5) {
@@ -283,13 +255,10 @@ The indexer provides a GraphQL API at `http://localhost:42069` with auto-generat
 ```
 
 #### 6. Get LP Actions History
+
 ```graphql
 {
-  lpActionss(
-    limit: 20,
-    orderBy: "timestamp",
-    orderDirection: "desc"
-  ) {
+  lpActionss(limit: 20, orderBy: "timestamp", orderDirection: "desc") {
     items {
       id
       lpAddress
@@ -304,13 +273,10 @@ The indexer provides a GraphQL API at `http://localhost:42069` with auto-generat
 ```
 
 #### 7. Get Withdrawals
+
 ```graphql
 {
-  withdrawalss(
-    limit: 10,
-    orderBy: "timestamp",
-    orderDirection: "desc"
-  ) {
+  withdrawalss(limit: 10, orderBy: "timestamp", orderDirection: "desc") {
     items {
       id
       userAddress
@@ -324,6 +290,7 @@ The indexer provides a GraphQL API at `http://localhost:42069` with auto-generat
 ```
 
 #### 8. Check Indexing Status
+
 ```graphql
 {
   _meta {
@@ -335,6 +302,7 @@ The indexer provides a GraphQL API at `http://localhost:42069` with auto-generat
 ### Query Parameters
 
 All list queries support the following parameters:
+
 - `limit`: Number of items to return (pagination)
 - `orderBy`: Field name to sort by
 - `orderDirection`: Sort direction (`"asc"` or `"desc"`)
@@ -344,12 +312,10 @@ All list queries support the following parameters:
 ### Filter Examples
 
 #### Filter Active Liquidity Providers
+
 ```graphql
 {
-  liquidityProviderss(
-    where: { isActive: true },
-    limit: 10
-  ) {
+  liquidityProviderss(where: { isActive: true }, limit: 10) {
     items {
       id
       principal
@@ -360,12 +326,10 @@ All list queries support the following parameters:
 ```
 
 #### Filter Tickets by Round
+
 ```graphql
 {
-  ticketss(
-    where: { roundId: "1" },
-    limit: 50
-  ) {
+  ticketss(where: { roundId: "1" }, limit: 50) {
     items {
       id
       buyerAddress
@@ -375,18 +339,6 @@ All list queries support the following parameters:
 }
 ```
 
-## Production Deployment
-
-For production deployment, see the deployment guide in `.ai/CURRENT-PLAN.md`.
-
-## Contributing
-
-1. Create a feature branch
-2. Make your changes
-3. Run tests and ensure they pass
-4. Run linting and fix any issues
-5. Submit a pull request
-
 ## License
 
-[License Type]
+MIT
