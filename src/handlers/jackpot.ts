@@ -1,14 +1,7 @@
 import { ponder } from "ponder:registry";
-import {
-  jackpotRounds,
-  users,
-  tickets,
-  liquidityProviders,
-  feeDistributions,
-} from "ponder:schema";
+import { jackpotRounds, users, feeDistributions } from "ponder:schema";
 import { generateEventId } from "../utils/calculations";
 import {
-  TOTAL_FEE_BPS,
   BPS_DIVISOR,
   LP_FEE_BPS,
   REFERRAL_FEE_BPS,
@@ -128,6 +121,45 @@ ponder.on("BaseJackpot:JackpotRun", async ({ event, context }) => {
     createdAt: nextRoundTimestamp,
     updatedAt: nextRoundTimestamp,
   });
+
+  if (lpFees > 0n) {
+    await context.db.insert(feeDistributions).values({
+      id: `${eventId}-lp`,
+      feeType: "LP_FEE",
+      amount: lpFees,
+      roundId: currentRoundId,
+      recipientAddress: "0x0000000000000000000000000000000000000000",
+      timestamp: timestamp,
+      transactionHash: event.transaction.hash,
+      blockNumber: event.block.number,
+    });
+  }
+
+  if (referralFees > 0n) {
+    await context.db.insert(feeDistributions).values({
+      id: `${eventId}-referral`,
+      feeType: "REFERRAL_FEE",
+      amount: referralFees,
+      roundId: currentRoundId,
+      recipientAddress: "0x0000000000000000000000000000000000000000",
+      timestamp: timestamp,
+      transactionHash: event.transaction.hash,
+      blockNumber: event.block.number,
+    });
+  }
+
+  if (protocolFees > 0n) {
+    await context.db.insert(feeDistributions).values({
+      id: `${eventId}-protocol`,
+      feeType: "PROTOCOL_FEE",
+      amount: protocolFees,
+      roundId: currentRoundId,
+      recipientAddress: "0x0000000000000000000000000000000000000000",
+      timestamp: timestamp,
+      transactionHash: event.transaction.hash,
+      blockNumber: event.block.number,
+    });
+  }
 
   console.log(
     `Jackpot run completed for round ${currentRoundId}: winner ${winner}, amount ${winAmount}, ticket ${winningTicket}`

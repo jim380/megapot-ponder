@@ -166,6 +166,8 @@ describe("Jackpot Handlers", () => {
         feeType: "LP_FEE",
         amount: lpFees,
         roundId: getCurrentRoundId(1700086400),
+        recipientAddress: "0x0000000000000000000000000000000000000000",
+        timestamp: 1700086400,
       });
     });
 
