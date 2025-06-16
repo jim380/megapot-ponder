@@ -12,3 +12,4 @@ export const TOTAL_FEE_BPS = PROTOCOL_FEE_BPS + REFERRAL_FEE_BPS + LP_FEE_BPS; /
 
 export const BPS_DIVISOR = 10000n;
 export const USDC_DECIMALS = 6;
+export const TICKET_PRICE = 1000000n; // $1 USDC (6 decimals)

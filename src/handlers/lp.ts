@@ -7,6 +7,7 @@ import {
   jackpotRounds,
 } from "ponder:schema";
 import { generateEventId } from "../utils/calculations";
+import { calculateEffectiveLpStake } from "../types/schema";
 
 ponder.on("BaseJackpot:LpDeposit", async ({ event, context }) => {
   const { lpAddress, amount, riskPercentage } = event.args;
@@ -24,6 +25,7 @@ ponder.on("BaseJackpot:LpDeposit", async ({ event, context }) => {
       totalTicketsPurchased: 0n,
       totalWinnings: 0n,
       totalReferralFees: 0n,
+      totalSpent: 0n,
       isActive: true,
       isLP: true,
       createdAt: timestamp,
@@ -42,6 +44,7 @@ ponder.on("BaseJackpot:LpDeposit", async ({ event, context }) => {
       principal: amount,
       stake: 0n,
       riskPercentage: Number(riskPercentage),
+      effectiveStake: calculateEffectiveLpStake(amount, Number(riskPercentage)),
       isActive: true,
       totalDeposited: amount,
       totalWithdrawn: 0n,
@@ -50,14 +53,22 @@ ponder.on("BaseJackpot:LpDeposit", async ({ event, context }) => {
       createdAt: timestamp,
       updatedAt: timestamp,
     })
-    .onConflictDoUpdate((current) => ({
-      principal: current.principal + amount,
-      totalDeposited: current.totalDeposited + amount,
-      riskPercentage: Number(riskPercentage),
-      isActive: true,
-      lastActionAt: timestamp,
-      updatedAt: timestamp,
-    }));
+    .onConflictDoUpdate((current) => {
+      const newPrincipal = current.principal + amount;
+      const newEffectiveStake = calculateEffectiveLpStake(
+        newPrincipal,
+        Number(riskPercentage)
+      );
+      return {
+        principal: newPrincipal,
+        totalDeposited: current.totalDeposited + amount,
+        riskPercentage: Number(riskPercentage),
+        effectiveStake: newEffectiveStake,
+        isActive: true,
+        lastActionAt: timestamp,
+        updatedAt: timestamp,
+      };
+    });
 
   const currentRound = await getCurrentRound(context, timestamp);
 
@@ -72,6 +83,15 @@ ponder.on("BaseJackpot:LpDeposit", async ({ event, context }) => {
     blockNumber: BigInt(event.block.number),
     timestamp,
   });
+
+  if (currentRound) {
+    await context.db
+      .update(jackpotRounds, { id: currentRound.id })
+      .set((current) => ({
+        totalLpSupplied: current.totalLpSupplied + amount,
+        updatedAt: timestamp,
+      }));
+  }
 });
 
 ponder.on("BaseJackpot:LpPrincipalWithdrawal", async ({ event, context }) => {
@@ -80,16 +100,25 @@ ponder.on("BaseJackpot:LpPrincipalWithdrawal", async ({ event, context }) => {
   const timestamp = Number(event.block.timestamp);
   const lpId = lpAddress.toLowerCase();
 
-  await context.db.update(liquidityProviders, { id: lpId }).set((current) => ({
-    principal:
+  await context.db.update(liquidityProviders, { id: lpId }).set((current) => {
+    const newPrincipal =
       current.principal > principalAmount
         ? current.principal - principalAmount
-        : 0n,
-    totalWithdrawn: current.totalWithdrawn + principalAmount,
-    isActive: current.principal - principalAmount > 0n,
-    lastActionAt: timestamp,
-    updatedAt: timestamp,
-  }));
+        : 0n;
+    const newEffectiveStake = calculateEffectiveLpStake(
+      newPrincipal,
+      current.riskPercentage
+    );
+
+    return {
+      principal: newPrincipal,
+      effectiveStake: newEffectiveStake,
+      totalWithdrawn: current.totalWithdrawn + principalAmount,
+      isActive: newPrincipal > 0n,
+      lastActionAt: timestamp,
+      updatedAt: timestamp,
+    };
+  });
 
   const currentRound = await getCurrentRound(context, timestamp);
 
@@ -104,6 +133,18 @@ ponder.on("BaseJackpot:LpPrincipalWithdrawal", async ({ event, context }) => {
     blockNumber: BigInt(event.block.number),
     timestamp,
   });
+
+  if (currentRound) {
+    await context.db
+      .update(jackpotRounds, { id: currentRound.id })
+      .set((current) => ({
+        totalLpSupplied:
+          current.totalLpSupplied > principalAmount
+            ? current.totalLpSupplied - principalAmount
+            : 0n,
+        updatedAt: timestamp,
+      }));
+  }
 });
 
 ponder.on("BaseJackpot:LpStakeWithdrawal", async ({ event, context }) => {
@@ -112,14 +153,18 @@ ponder.on("BaseJackpot:LpStakeWithdrawal", async ({ event, context }) => {
   const timestamp = Number(event.block.timestamp);
   const lpId = lpAddress.toLowerCase();
 
-  const stakeAmount = 0n;
+  let withdrawnStake = 0n;
 
-  await context.db.update(liquidityProviders, { id: lpId }).set((current) => ({
-    stake: 0n,
-    totalFeesEarned: current.totalFeesEarned + current.stake,
-    lastActionAt: timestamp,
-    updatedAt: timestamp,
-  }));
+  await context.db.update(liquidityProviders, { id: lpId }).set((current) => {
+    withdrawnStake = current.stake;
+    return {
+      stake: 0n,
+      totalFeesEarned: current.totalFeesEarned + current.stake,
+      totalWithdrawn: current.totalWithdrawn + current.stake,
+      lastActionAt: timestamp,
+      updatedAt: timestamp,
+    };
+  });
 
   const currentRound = await getCurrentRound(context, timestamp);
 
@@ -127,7 +172,7 @@ ponder.on("BaseJackpot:LpStakeWithdrawal", async ({ event, context }) => {
     id: eventId,
     lpAddress: lpId,
     actionType: "WITHDRAWAL",
-    amount: stakeAmount,
+    amount: withdrawnStake,
     riskPercentage: null,
     effectiveRoundId: currentRound ? String(currentRound.id) : null,
     transactionHash: event.transaction.hash,
@@ -144,10 +189,17 @@ ponder.on(
     const timestamp = Number(event.block.timestamp);
     const lpId = lpAddress.toLowerCase();
 
-    await context.db.update(liquidityProviders, { id: lpId }).set({
-      riskPercentage: Number(riskPercentage),
-      lastActionAt: timestamp,
-      updatedAt: timestamp,
+    await context.db.update(liquidityProviders, { id: lpId }).set((current) => {
+      const newEffectiveStake = calculateEffectiveLpStake(
+        current.principal,
+        Number(riskPercentage)
+      );
+      return {
+        riskPercentage: Number(riskPercentage),
+        effectiveStake: newEffectiveStake,
+        lastActionAt: timestamp,
+        updatedAt: timestamp,
+      };
     });
 
     const currentRound = await getCurrentRound(context, timestamp);
@@ -172,11 +224,23 @@ ponder.on("BaseJackpot:LpRebalance", async ({ event, context }) => {
   const timestamp = Number(event.block.timestamp);
   const lpId = lpAddress.toLowerCase();
 
-  await context.db.update(liquidityProviders, { id: lpId }).set({
-    principal,
-    stake,
-    lastActionAt: timestamp,
-    updatedAt: timestamp,
+  let feeEarned = 0n;
+
+  await context.db.update(liquidityProviders, { id: lpId }).set((current) => {
+    feeEarned = stake > current.stake ? stake - current.stake : 0n;
+    const newEffectiveStake = calculateEffectiveLpStake(
+      principal,
+      current.riskPercentage
+    );
+
+    return {
+      principal,
+      stake,
+      effectiveStake: newEffectiveStake,
+      totalFeesEarned: current.totalFeesEarned + feeEarned,
+      lastActionAt: timestamp,
+      updatedAt: timestamp,
+    };
   });
 
   const currentRound = await getCurrentRound(context, timestamp);
@@ -189,19 +253,21 @@ ponder.on("BaseJackpot:LpRebalance", async ({ event, context }) => {
         id: snapshotId,
         lpAddress: lpId,
         roundId: String(currentRound.id),
-        beginningPrincipal: 0n,
-        beginningStake: 0n,
+        beginningPrincipal: principal,
+        beginningStake: stake - feeEarned,
         endingPrincipal: principal,
         endingStake: stake,
         activeRiskPercentage: 100,
-        feesEarned: 0n,
-        profitLoss: 0n,
+        feesEarned: feeEarned,
+        profitLoss: feeEarned,
         createdAt: timestamp,
       })
-      .onConflictDoUpdate({
+      .onConflictDoUpdate((current) => ({
         endingPrincipal: principal,
         endingStake: stake,
-      });
+        feesEarned: current.feesEarned + feeEarned,
+        profitLoss: current.profitLoss + feeEarned,
+      }));
   }
 
   await context.db.insert(lpActions).values({

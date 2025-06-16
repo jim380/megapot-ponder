@@ -41,6 +41,7 @@ describe("Ticket Handlers", () => {
         id: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         ticketsPurchasedTotalBps: 100n,
         totalTicketsPurchased: 1n,
+        totalSpent: 10000n, // 100 bps * 1000000 / 10000 = 10000
         isActive: true,
       });
 

@@ -76,6 +76,7 @@ export const createMockDbV11 = () => {
             totalReferralFees: 0n,
             ticketsPurchasedTotalBps: 0n,
             totalTicketsPurchased: 0n,
+            totalSpent: 0n,
             ticketCountTotalBps: 0n,
             principal: 1000000n,
             stake: 100000n,
@@ -84,6 +85,7 @@ export const createMockDbV11 = () => {
             totalFeesEarned: 0n,
             riskPercentage: 50,
             isActive: true,
+            totalLpSupplied: 0n,
             updatedAt: 0,
           };
           const result = updateData(mockCurrent);

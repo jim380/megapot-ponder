@@ -6,13 +6,15 @@ import {
   withdrawals,
   feeDistributions,
 } from "ponder:schema";
-import { ZERO_ADDRESS } from "../utils/constants";
+import { ZERO_ADDRESS, BPS_DIVISOR, TICKET_PRICE } from "../utils/constants";
 import { calculateReferralFee, generateEventId } from "../utils/calculations";
 
 ponder.on("BaseJackpot:UserTicketPurchase", async ({ event, context }) => {
   const { recipient, ticketsPurchasedTotalBps, referrer, buyer } = event.args;
   const eventId = generateEventId(event.transaction.hash, event.log.logIndex);
   const timestamp = Number(event.block.timestamp);
+
+  const purchasePrice = (ticketsPurchasedTotalBps * TICKET_PRICE) / BPS_DIVISOR;
 
   const currentRound = await getCurrentRound(context, timestamp);
   if (!currentRound) {
@@ -30,6 +32,7 @@ ponder.on("BaseJackpot:UserTicketPurchase", async ({ event, context }) => {
       totalTicketsPurchased: 1n,
       totalWinnings: 0n,
       totalReferralFees: 0n,
+      totalSpent: purchasePrice,
       isActive: true,
       isLP: false,
       createdAt: timestamp,
@@ -39,6 +42,7 @@ ponder.on("BaseJackpot:UserTicketPurchase", async ({ event, context }) => {
       ticketsPurchasedTotalBps:
         current.ticketsPurchasedTotalBps + ticketsPurchasedTotalBps,
       totalTicketsPurchased: current.totalTicketsPurchased + 1n,
+      totalSpent: current.totalSpent + purchasePrice,
       isActive: true,
       updatedAt: timestamp,
     }));
@@ -50,7 +54,7 @@ ponder.on("BaseJackpot:UserTicketPurchase", async ({ event, context }) => {
     recipientAddress: recipient.toLowerCase(),
     ticketsPurchasedBps: ticketsPurchasedTotalBps,
     referrerAddress: referrer.toLowerCase(),
-    purchasePrice: 0n,
+    purchasePrice,
     transactionHash: event.transaction.hash,
     blockNumber: BigInt(event.block.number),
     timestamp,
@@ -67,6 +71,7 @@ ponder.on("BaseJackpot:UserTicketPurchase", async ({ event, context }) => {
         totalTicketsPurchased: 0n,
         totalWinnings: 0n,
         totalReferralFees: 0n,
+        totalSpent: 0n,
         isActive: true,
         isLP: false,
         createdAt: timestamp,

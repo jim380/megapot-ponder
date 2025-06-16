@@ -101,27 +101,6 @@ ponder.on("BaseJackpot:JackpotRun", async ({ event, context }) => {
       }));
   }
 
-  const nextRoundTimestamp = Number(time);
-  const nextRoundId = getCurrentRoundId(nextRoundTimestamp);
-  await context.db.insert(jackpotRounds).values({
-    id: nextRoundId,
-    status: "ACTIVE",
-    startTime: nextRoundTimestamp,
-    endTime: null,
-    totalTicketsValue: 0n,
-    totalLpSupplied: 0n,
-    jackpotAmount: 0n,
-    ticketCountTotalBps: 0n,
-    randomNumber: null,
-    winnerAddress: null,
-    winningTicketNumber: null,
-    lpFeesGenerated: 0n,
-    referralFeesGenerated: 0n,
-    protocolFeesGenerated: 0n,
-    createdAt: nextRoundTimestamp,
-    updatedAt: nextRoundTimestamp,
-  });
-
   if (lpFees > 0n) {
     await context.db.insert(feeDistributions).values({
       id: `${eventId}-lp`,

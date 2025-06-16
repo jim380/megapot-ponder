@@ -93,7 +93,7 @@ describe("Jackpot Handlers", () => {
   });
 
   describe("JackpotRun Handler", () => {
-    it("should finalize round, update winner, and create next round", async () => {
+    it("should finalize round and update winner", async () => {
       const winAmount = 1000000n;
       const mockEvent = createMockEvent({
         name: "BaseJackpot:JackpotRun",
@@ -146,16 +146,6 @@ describe("Jackpot Handlers", () => {
       expect(winnerUpdate.data).toMatchObject({
         winningsClaimable: winAmount,
         updatedAt: 1700086400,
-      });
-
-      const nextRoundInsert = inserts.find(
-        (i) => i.table === "jackpotRounds" && i.data.status === "ACTIVE"
-      );
-      expect(nextRoundInsert).toBeDefined();
-      expect(nextRoundInsert.data).toMatchObject({
-        id: getCurrentRoundId(1700086400),
-        status: "ACTIVE",
-        startTime: 1700086400,
       });
 
       const lpFeeInsert = inserts.find(
