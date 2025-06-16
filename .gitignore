@@ -17,6 +17,9 @@ yarn-error.log*
 /generated/
 /.ponder/
 
+# Test coverage
+/coverage/
+
 # Markdown files
 *.md
 **/*.md

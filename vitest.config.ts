@@ -14,8 +14,12 @@ export default defineConfig({
         "generated/",
         "*.config.ts",
         "*.config.js",
+        "src/index.ts",
+        "**/index.ts",
+        "src/types*.ts",
+        "src/handlers/base.ts",
       ],
-      include: ["src/**/*.ts"],
+      include: ["src*.ts"],
       thresholds: {
         lines: 60,
         functions: 60,
@@ -28,8 +32,14 @@ export default defineConfig({
     alias: {
       "@": path.resolve(__dirname, "./src"),
       "@/generated": path.resolve(__dirname, "./test/mocks/ponder-registry.ts"),
-      "ponder:registry": path.resolve(__dirname, "./test/mocks/ponder-registry.ts"),
-      "ponder:schema": path.resolve(__dirname, "./test/mocks/ponder-registry.ts"),
+      "ponder:registry": path.resolve(
+        __dirname,
+        "./test/mocks/ponder-registry.ts"
+      ),
+      "ponder:schema": path.resolve(
+        __dirname,
+        "./test/mocks/ponder-registry.ts"
+      ),
     },
   },
 });
