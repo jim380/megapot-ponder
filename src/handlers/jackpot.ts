@@ -99,12 +99,14 @@ ponder.on("BaseJackpot:JackpotRun", async ({ event, context }) => {
     updatedAt: timestamp,
   });
 
-  await context.db
-    .update(users, { id: winner.toLowerCase() })
-    .set((current) => ({
-      winningsClaimable: current.winningsClaimable + winAmount,
-      updatedAt: timestamp,
-    }));
+  if (winner !== "0x0000000000000000000000000000000000000000") {
+    await context.db
+      .update(users, { id: winner.toLowerCase() })
+      .set((current) => ({
+        winningsClaimable: current.winningsClaimable + winAmount,
+        updatedAt: timestamp,
+      }));
+  }
 
   const nextRoundTimestamp = Number(time);
   const nextRoundId = getCurrentRoundId(nextRoundTimestamp);
@@ -126,45 +128,6 @@ ponder.on("BaseJackpot:JackpotRun", async ({ event, context }) => {
     createdAt: nextRoundTimestamp,
     updatedAt: nextRoundTimestamp,
   });
-
-  if (lpFees > 0n) {
-    await context.db.insert(feeDistributions).values({
-      id: `${eventId}-lp`,
-      roundId: currentRoundId,
-      feeType: "LP_FEE",
-      amount: lpFees,
-      recipientAddress: null as any,
-      transactionHash: event.transaction.hash,
-      blockNumber: BigInt(event.block.number),
-      timestamp,
-    });
-  }
-
-  if (referralFees > 0n) {
-    await context.db.insert(feeDistributions).values({
-      id: `${eventId}-referral`,
-      roundId: currentRoundId,
-      feeType: "REFERRAL_FEE",
-      amount: referralFees,
-      recipientAddress: null as any,
-      transactionHash: event.transaction.hash,
-      blockNumber: BigInt(event.block.number),
-      timestamp,
-    });
-  }
-
-  if (protocolFees > 0n) {
-    await context.db.insert(feeDistributions).values({
-      id: `${eventId}-protocol`,
-      roundId: currentRoundId,
-      feeType: "PROTOCOL_FEE",
-      amount: protocolFees,
-      recipientAddress: null as any,
-      transactionHash: event.transaction.hash,
-      blockNumber: BigInt(event.block.number),
-      timestamp,
-    });
-  }
 
   console.log(
     `Jackpot run completed for round ${currentRoundId}: winner ${winner}, amount ${winAmount}, ticket ${winningTicket}`
