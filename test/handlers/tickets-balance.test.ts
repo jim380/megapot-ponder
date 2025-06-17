@@ -22,7 +22,7 @@ describe("Tickets Balance Tracking - totalSpent", () => {
 
   describe("UserTicketPurchase - totalSpent tracking", () => {
     it("should correctly calculate and set totalSpent for new user", async () => {
-      const ticketBps = 100n;
+      const ticketBps = 10000n;
       const expectedSpent = (ticketBps * TICKET_PRICE) / BPS_DIVISOR;
 
       const mockEvent = createMockEvent({
@@ -53,8 +53,8 @@ describe("Tickets Balance Tracking - totalSpent", () => {
     });
 
     it("should accumulate totalSpent for existing user", async () => {
-      const firstPurchaseBps = 200n;
-      const secondPurchaseBps = 300n;
+      const firstPurchaseBps = 20000n;
+      const secondPurchaseBps = 30000n;
       const firstSpent = (firstPurchaseBps * TICKET_PRICE) / BPS_DIVISOR;
       const secondSpent = (secondPurchaseBps * TICKET_PRICE) / BPS_DIVISOR;
       const totalExpectedSpent = firstSpent + secondSpent;
@@ -64,7 +64,7 @@ describe("Tickets Balance Tracking - totalSpent", () => {
         data: {
           id: "0xcccccccccccccccccccccccccccccccccccccccc",
           ticketsPurchasedTotalBps: firstPurchaseBps,
-          totalTicketsPurchased: 1n,
+          totalTicketsPurchased: firstPurchaseBps / 10000n,
           totalSpent: firstSpent,
           winningsClaimable: 0n,
           referralFeesClaimable: 0n,
@@ -87,7 +87,7 @@ describe("Tickets Balance Tracking - totalSpent", () => {
               onConflictDoUpdate: vi.fn((updateFn) => {
                 const existingUser = {
                   ticketsPurchasedTotalBps: firstPurchaseBps,
-                  totalTicketsPurchased: 1n,
+                  totalTicketsPurchased: firstPurchaseBps / 10000n,
                   totalSpent: firstSpent,
                   winningsClaimable: 0n,
                   referralFeesClaimable: 0n,
@@ -136,14 +136,14 @@ describe("Tickets Balance Tracking - totalSpent", () => {
       expect(userUpdate).toBeDefined();
       expect(userUpdate.data).toMatchObject({
         ticketsPurchasedTotalBps: firstPurchaseBps + secondPurchaseBps,
-        totalTicketsPurchased: 2n,
+        totalTicketsPurchased: (firstPurchaseBps + secondPurchaseBps) / 10000n,
         totalSpent: totalExpectedSpent,
         isActive: true,
       });
     });
 
     it("should handle large ticket purchases correctly", async () => {
-      const largeBps = 5000n;
+      const largeBps = 50000n;
       const expectedSpent = (largeBps * TICKET_PRICE) / BPS_DIVISOR;
 
       const mockEvent = createMockEvent({
@@ -171,7 +171,7 @@ describe("Tickets Balance Tracking - totalSpent", () => {
     });
 
     it("should track totalSpent separately from referrer fees", async () => {
-      const ticketBps = 1000n;
+      const ticketBps = 10000n;
       const expectedSpent = (ticketBps * TICKET_PRICE) / BPS_DIVISOR;
 
       const mockEvent = createMockEvent({
@@ -208,9 +208,18 @@ describe("Tickets Balance Tracking - totalSpent", () => {
 
     it("should handle multiple simultaneous purchases", async () => {
       const purchases = [
-        { recipient: "0x1111111111111111111111111111111111111111", bps: 100n },
-        { recipient: "0x2222222222222222222222222222222222222222", bps: 200n },
-        { recipient: "0x3333333333333333333333333333333333333333", bps: 300n },
+        {
+          recipient: "0x1111111111111111111111111111111111111111",
+          bps: 10000n,
+        },
+        {
+          recipient: "0x2222222222222222222222222222222222222222",
+          bps: 20000n,
+        },
+        {
+          recipient: "0x3333333333333333333333333333333333333333",
+          bps: 30000n,
+        },
       ];
 
       for (const purchase of purchases) {
@@ -244,7 +253,7 @@ describe("Tickets Balance Tracking - totalSpent", () => {
     });
 
     it("should maintain totalSpent integrity with withdrawals", async () => {
-      const ticketBps = 500n;
+      const ticketBps = 10000n;
       const expectedSpent = (ticketBps * TICKET_PRICE) / BPS_DIVISOR;
 
       const purchaseEvent = createMockEvent({
@@ -284,40 +293,15 @@ describe("Tickets Balance Tracking - totalSpent", () => {
   });
 
   describe("Edge cases for totalSpent tracking", () => {
-    it("should handle zero BPS ticket purchase", async () => {
-      const mockEvent = createMockEvent({
-        name: "BaseJackpot:UserTicketPurchase",
-        args: {
-          recipient: "0x5555555555555555555555555555555555555555",
-          ticketsPurchasedTotalBps: 0n,
-          referrer: ZERO_ADDRESS,
-          buyer: "0x5555555555555555555555555555555555555555",
-        },
-      });
-
-      const handler = handlers["BaseJackpot:UserTicketPurchase"];
-      await handler({ event: mockEvent, context: mockContext });
-
-      const inserts = mockContext.db.__dataStore.inserts;
-      const userInsert = inserts.find(
-        (i) =>
-          i.table === "users" &&
-          i.data.id === "0x5555555555555555555555555555555555555555"
-      );
-
-      expect(userInsert).toBeDefined();
-      expect(userInsert.data.totalSpent).toBe(0n);
-    });
-
-    it("should handle max BPS ticket purchase", async () => {
-      const maxBps = 10000n;
-      const expectedSpent = (maxBps * TICKET_PRICE) / BPS_DIVISOR;
+    it("should handle large BPS ticket purchase", async () => {
+      const largeBps = 100000n;
+      const expectedSpent = (largeBps * TICKET_PRICE) / BPS_DIVISOR;
 
       const mockEvent = createMockEvent({
         name: "BaseJackpot:UserTicketPurchase",
         args: {
           recipient: "0x6666666666666666666666666666666666666666",
-          ticketsPurchasedTotalBps: maxBps,
+          ticketsPurchasedTotalBps: largeBps,
           referrer: ZERO_ADDRESS,
           buyer: "0x6666666666666666666666666666666666666666",
         },

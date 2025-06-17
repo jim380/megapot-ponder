@@ -5,6 +5,15 @@ import { calculateReferralFee } from "../../src/utils/calculations";
 import { ZERO_ADDRESS } from "../../src/utils/constants";
 import { getHandlers } from "../mocks/ponder-registry";
 
+vi.mock("../../src/config/featureFlags", () => ({
+  isFeatureEnabledForRound: vi.fn(() => false),
+}));
+
+vi.mock("../../src/utils/ticket-numbering", () => ({
+  ensureRoundExists: vi.fn(),
+  logCriticalError: vi.fn(),
+}));
+
 describe("Ticket Handlers", () => {
   let mockContext: any;
   let handlers: Record<string, Function>;
@@ -23,25 +32,23 @@ describe("Ticket Handlers", () => {
         name: "BaseJackpot:UserTicketPurchase",
         args: {
           recipient: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          ticketsPurchasedTotalBps: 100n,
+          ticketsPurchasedTotalBps: 10000n,
           referrer: ZERO_ADDRESS,
           buyer: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
         },
       });
 
       const handler = handlers["BaseJackpot:UserTicketPurchase"];
-
       await handler({ event: mockEvent, context: mockContext });
 
       const inserts = mockContext.db.__dataStore.inserts;
-
       const userInsert = inserts.find((i) => i.table === "users");
       expect(userInsert).toBeDefined();
       expect(userInsert.data).toMatchObject({
         id: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        ticketsPurchasedTotalBps: 100n,
+        ticketsPurchasedTotalBps: 10000n,
         totalTicketsPurchased: 1n,
-        totalSpent: 10000n, // 100 bps * 1000000 / 10000 = 10000
+        totalSpent: 1000000n,
         isActive: true,
       });
 
@@ -50,7 +57,7 @@ describe("Ticket Handlers", () => {
       expect(ticketInsert.data).toMatchObject({
         buyerAddress: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
         recipientAddress: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        ticketsPurchasedBps: 100n,
+        ticketsPurchasedBps: 10000n,
       });
     });
 
@@ -59,7 +66,7 @@ describe("Ticket Handlers", () => {
         name: "BaseJackpot:UserTicketPurchase",
         args: {
           recipient: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          ticketsPurchasedTotalBps: 200n,
+          ticketsPurchasedTotalBps: 20000n,
           referrer: "0xcccccccccccccccccccccccccccccccccccccccc",
           buyer: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
         },

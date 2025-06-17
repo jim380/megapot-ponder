@@ -1,6 +1,6 @@
 import { onchainTable, index } from "ponder";
 
-export type RoundStatus = "ACTIVE" | "DRAWING" | "RESOLVED";
+export type RoundStatus = "ACTIVE" | "DRAWING" | "RESOLVED" | "NEEDS_RECONCILIATION";
 export type LpActionType = "DEPOSIT" | "WITHDRAWAL" | "RISK_ADJUSTMENT";
 export type FeeType = "LP_FEE" | "REFERRAL_FEE" | "PROTOCOL_FEE";
 
@@ -59,6 +59,8 @@ export const jackpotRounds = onchainTable(
     totalLpSupplied: t.bigint().notNull().default(0n),
     jackpotAmount: t.bigint().notNull().default(0n),
     ticketCountTotalBps: t.bigint().notNull().default(0n),
+    nextTicketNumber: t.bigint().notNull().default(1n),
+    version: t.bigint().notNull().default(0n),
     randomNumber: t.text(),
     winnerAddress: t.text(),
     winningTicketNumber: t.bigint(),
@@ -72,6 +74,8 @@ export const jackpotRounds = onchainTable(
     statusIdx: index().on(table.status),
     startTimeIdx: index().on(table.startTime),
     endTimeIdx: index().on(table.endTime),
+    activeRoundsIdx: index().on(table.status, table.startTime),
+    versionIdx: index().on(table.version),
   })
 );
 
@@ -217,5 +221,78 @@ export const hourlyStats = onchainTable(
   }),
   (table) => ({
     hourIdx: index().on(table.hourTimestamp),
+  })
+);
+
+export const ticketRanges = onchainTable(
+  "ticketRanges",
+  (t) => ({
+    id: t.text().primaryKey(),
+    roundId: t.text().notNull(),
+    userAddress: t.text().notNull(),
+    startTicketNumber: t.bigint().notNull(),
+    endTicketNumber: t.bigint().notNull(),
+    ticketCount: t.bigint().notNull(),
+    blockNumber: t.bigint().notNull(),
+    timestamp: t.integer().notNull(),
+    transactionHash: t.text().notNull(),
+    logIndex: t.integer().notNull(),
+  }),
+  (table) => ({
+    roundIdx: index().on(table.roundId),
+    userIdx: index().on(table.userAddress),
+    winnerLookupIdx: index().on(
+      table.roundId,
+      table.startTicketNumber,
+      table.endTicketNumber
+    ),
+    userRoundIdx: index().on(table.userAddress, table.roundId),
+  })
+);
+
+export const ticketIntegrityChecks = onchainTable(
+  "ticketIntegrityChecks",
+  (t) => ({
+    id: t.text().primaryKey(),
+    roundId: t.text().notNull(),
+    checkTime: t.integer().notNull(),
+    hasGaps: t.boolean().notNull(),
+    expectedCount: t.bigint().notNull(),
+    actualCount: t.bigint().notNull(),
+    isValid: t.boolean().notNull(),
+    errorDetails: t.text(),
+    severity: t.text().notNull().default("INFO"),
+  }),
+  (table) => ({
+    roundIdx: index().on(table.roundId),
+    severityIdx: index().on(table.severity),
+    checkTimeIdx: index().on(table.checkTime),
+  })
+);
+
+export const ticketFailures = onchainTable(
+  "ticketFailures",
+  (t) => ({
+    id: t.text().primaryKey(),
+    roundId: t.text().notNull(),
+    userAddress: t.text().notNull(),
+    ticketsPurchasedTotalBps: t.bigint().notNull(),
+    eventId: t.text().notNull(),
+    errorMessage: t.text().notNull(),
+    retryCount: t.integer().notNull().default(0),
+    maxRetries: t.integer().notNull().default(3),
+    status: t
+      .text()
+      .$type<"pending" | "processing" | "failed" | "recovered">()
+      .notNull()
+      .default("pending"),
+    createdAt: t.integer().notNull(),
+    updatedAt: t.integer().notNull(),
+    recoveredAt: t.integer(),
+  }),
+  (table) => ({
+    statusIdx: index().on(table.status),
+    createdAtIdx: index().on(table.createdAt),
+    roundUserIdx: index().on(table.roundId, table.userAddress),
   })
 );

@@ -20,45 +20,59 @@ export const createMockDbV11 = () => {
   };
 
   const createInsertChain = () => {
-    let pendingData: any = null;
-    let tableName: string = "";
-
-    const chain = {
-      values: vi.fn((data: any) => {
-        pendingData = data;
-        dataStore.inserts.push({ table: tableName, data });
-        return chain;
-      }),
-      onConflictDoNothing: vi.fn(() => {
-        return chain;
-      }),
-      onConflictDoUpdate: vi.fn((updateFn: any) => {
-        if (typeof updateFn === "function" && pendingData) {
-          const mockExisting = {
-            ...pendingData,
-            principal: 1000000n,
-            totalDeposited: 1000000n,
-          };
-          const updatedData = updateFn(mockExisting);
-          dataStore.updates.push({
-            table: tableName,
-            filter: { id: pendingData.id },
-            data: updatedData,
-          });
-        } else if (typeof updateFn === "object") {
-          dataStore.updates.push({
-            table: tableName,
-            filter: { id: pendingData.id },
-            data: updateFn,
-          });
-        }
-        return chain;
-      }),
-    };
-
     return (table: any) => {
-      tableName = table?.name || "unknown";
-      return chain;
+      const tableName = table?.name || "unknown";
+      return {
+        values: vi.fn((data: any) => {
+          let isPlainInsert = true;
+
+          const result: any = {
+            onConflictDoNothing: vi.fn(() => {
+              isPlainInsert = false;
+              dataStore.inserts.push({ table: tableName, data });
+              return Promise.resolve();
+            }),
+            onConflictDoUpdate: vi.fn((updateFn: any) => {
+              isPlainInsert = false;
+              dataStore.inserts.push({ table: tableName, data });
+
+              if (typeof updateFn === "function") {
+                const mockExisting = {
+                  ...data,
+                  principal: 1000000n,
+                  totalDeposited: 1000000n,
+                };
+                const updatedData = updateFn(mockExisting);
+                dataStore.updates.push({
+                  table: tableName,
+                  filter: { id: data.id },
+                  data: updatedData,
+                });
+              } else if (typeof updateFn === "object") {
+                dataStore.updates.push({
+                  table: tableName,
+                  filter: { id: data.id },
+                  data: updateFn,
+                });
+              }
+              return Promise.resolve();
+            }),
+          };
+
+          result.then = vi.fn((onFulfilled: any, _onRejected?: any) => {
+            if (isPlainInsert) {
+              dataStore.inserts.push({ table: tableName, data });
+            }
+            const value = undefined;
+            if (onFulfilled) {
+              return Promise.resolve(onFulfilled(value));
+            }
+            return Promise.resolve(value);
+          });
+
+          return result;
+        }),
+      };
     };
   };
 
@@ -109,8 +123,8 @@ export const createMockDbV11 = () => {
   };
 
   const mockDb = {
-    insert: vi.fn(createInsertChain()),
-    update: vi.fn(createUpdateChain()),
+    insert: createInsertChain(),
+    update: createUpdateChain(),
 
     __dataStore: dataStore,
   };
