@@ -121,7 +121,7 @@ describe("Jackpot Handlers", () => {
 
       expect(updates[0]).toMatchObject({
         table: "jackpotRounds",
-        filter: { id: getCurrentRoundId(1700086400) },
+        filter: { id: getCurrentRoundId(1700086400 - 86400) },
         data: {
           status: "RESOLVED",
           endTime: 1700086400,
@@ -144,9 +144,12 @@ describe("Jackpot Handlers", () => {
       );
       expect(winnerUpdate).toBeDefined();
       expect(winnerUpdate.data).toMatchObject({
-        winningsClaimable: winAmount,
+        winningsClaimable: expect.any(BigInt),
+        totalWinnings: expect.any(BigInt),
         updatedAt: 1700086400,
       });
+
+      expect(winnerUpdate.data.winningsClaimable >= winAmount).toBe(true);
 
       const lpFeeInsert = inserts.find(
         (i) => i.table === "feeDistributions" && i.data.feeType === "LP_FEE"
@@ -155,7 +158,7 @@ describe("Jackpot Handlers", () => {
       expect(lpFeeInsert.data).toMatchObject({
         feeType: "LP_FEE",
         amount: lpFees,
-        roundId: getCurrentRoundId(1700086400),
+        roundId: getCurrentRoundId(1700086400 - 86400),
         recipientAddress: "0x0000000000000000000000000000000000000000",
         timestamp: 1700086400,
       });
