@@ -9,6 +9,7 @@ import {
   CallToolRequestSchema,
   CompleteRequestSchema,
   InitializeRequestSchema,
+  ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import type {
   InitializeRequest,
@@ -20,6 +21,7 @@ import type {
   CallToolRequest,
   CompleteRequest,
   ServerCapabilities,
+  ListToolsRequest,
 } from "@modelcontextprotocol/sdk/types.js";
 import http from "node:http";
 import { URL } from "node:url";
@@ -51,7 +53,7 @@ import { buildResourceUri, parseResourceUri, type MegapotResponse } from "./type
 import { validateMCPToolCall } from "./validation/index.js";
 import { executeTool } from "./tools/index.js";
 
-const SUPPORTED_PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26"] as const;
+const SUPPORTED_PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"] as const;
 
 export class MegapotMCPServer extends Server {
   private isShuttingDown = false;
@@ -93,13 +95,14 @@ export class MegapotMCPServer extends Server {
   private setupHandlers(): void {
     this.setRequestHandler(InitializeRequestSchema, this.handleInitialize.bind(this));
 
+    this.setRequestHandler(ListToolsRequestSchema, this.handleListTools.bind(this));
+    this.setRequestHandler(CallToolRequestSchema, this.handleCallTool.bind(this));
+
     this.setRequestHandler(ListResourcesRequestSchema, this.handleListResources.bind(this));
     this.setRequestHandler(ReadResourceRequestSchema, this.handleReadResource.bind(this));
 
     this.setRequestHandler(ListPromptsRequestSchema, this.handleListPrompts.bind(this));
     this.setRequestHandler(GetPromptRequestSchema, this.handleGetPrompt.bind(this));
-
-    this.setRequestHandler(CallToolRequestSchema, this.handleCallTool.bind(this));
 
     this.setRequestHandler(CompleteRequestSchema, this.handleComplete.bind(this));
   }
@@ -266,6 +269,193 @@ export class MegapotMCPServer extends Server {
         MCPCorrelation.removeContext(correlationContext.requestId);
       }
     };
+  }
+
+  private async handleListTools(_request: ListToolsRequest) {
+    const handler = await this.withSessionAndCorrelation(
+      "listTools",
+      async (_req, _context, logger) => {
+        logger.info("Listing tools");
+
+        return {
+          tools: [
+            {
+              name: "queryUsers",
+              description: "Query users with filtering, pagination, and sorting options",
+              inputSchema: {
+                type: "object",
+                properties: {
+                  first: {
+                    type: "integer",
+                    description: "Number of results to return (1-1000)",
+                    minimum: 1,
+                    maximum: 1000,
+                  },
+                  skip: { type: "integer", description: "Number of results to skip", minimum: 0 },
+                  orderBy: { type: "string", description: "Field to order by" },
+                  orderDirection: {
+                    type: "string",
+                    enum: ["asc", "desc"],
+                    description: "Sort direction",
+                  },
+                  where: {
+                    type: "object",
+                    description: "Filter conditions",
+                    properties: {
+                      isActive: { type: "boolean" },
+                      isLP: { type: "boolean" },
+                      totalWinnings_gt: { type: "string", description: "BigInt as string" },
+                      totalWinnings_lt: { type: "string", description: "BigInt as string" },
+                    },
+                  },
+                },
+              },
+            },
+            {
+              name: "queryRounds",
+              description: "Query jackpot rounds with filtering and sorting",
+              inputSchema: {
+                type: "object",
+                properties: {
+                  first: { type: "integer", minimum: 1, maximum: 1000 },
+                  skip: { type: "integer", minimum: 0 },
+                  orderBy: { type: "string" },
+                  orderDirection: { type: "string", enum: ["asc", "desc"] },
+                  where: {
+                    type: "object",
+                    properties: {
+                      status: {
+                        type: "string",
+                        enum: ["PENDING", "ACTIVE", "RESOLVED", "CANCELLED"],
+                      },
+                      startTime_gt: { type: "string" },
+                      startTime_lt: { type: "string" },
+                      resolvedAt_gt: { type: "string" },
+                      resolvedAt_lt: { type: "string" },
+                    },
+                  },
+                },
+              },
+            },
+            {
+              name: "queryTickets",
+              description: "Query tickets with filtering options",
+              inputSchema: {
+                type: "object",
+                properties: {
+                  first: { type: "integer", minimum: 1, maximum: 1000 },
+                  skip: { type: "integer", minimum: 0 },
+                  orderBy: { type: "string" },
+                  orderDirection: { type: "string", enum: ["asc", "desc"] },
+                  where: {
+                    type: "object",
+                    properties: {
+                      buyer: { type: "string", pattern: "^0x[a-fA-F0-9]{40}$" },
+                      recipient: { type: "string", pattern: "^0x[a-fA-F0-9]{40}$" },
+                      round: { type: "string" },
+                    },
+                  },
+                },
+              },
+            },
+            {
+              name: "queryLPs",
+              description: "Query liquidity providers with filtering",
+              inputSchema: {
+                type: "object",
+                properties: {
+                  first: { type: "integer", minimum: 1, maximum: 1000 },
+                  skip: { type: "integer", minimum: 0 },
+                  orderBy: { type: "string" },
+                  orderDirection: { type: "string", enum: ["asc", "desc"] },
+                  where: {
+                    type: "object",
+                    properties: {
+                      isActive: { type: "boolean" },
+                      stake_gt: { type: "string" },
+                      stake_lt: { type: "string" },
+                      riskPercentage_gt: { type: "integer", minimum: 0, maximum: 100 },
+                      riskPercentage_lt: { type: "integer", minimum: 0, maximum: 100 },
+                    },
+                  },
+                },
+              },
+            },
+            {
+              name: "getCurrentRound",
+              description: "Get the current active jackpot round",
+              inputSchema: {
+                type: "object",
+                properties: {},
+              },
+            },
+            {
+              name: "getProtocolStats",
+              description: "Get overall protocol statistics",
+              inputSchema: {
+                type: "object",
+                properties: {},
+              },
+            },
+            {
+              name: "getUserStats",
+              description: "Get statistics for a specific user",
+              inputSchema: {
+                type: "object",
+                properties: {
+                  address: {
+                    type: "string",
+                    pattern: "^0x[a-fA-F0-9]{40}$",
+                    description: "User Ethereum address",
+                  },
+                },
+                required: ["address"],
+              },
+            },
+            {
+              name: "getLpStats",
+              description: "Get statistics for a specific liquidity provider",
+              inputSchema: {
+                type: "object",
+                properties: {
+                  address: {
+                    type: "string",
+                    pattern: "^0x[a-fA-F0-9]{40}$",
+                    description: "LP Ethereum address",
+                  },
+                },
+                required: ["address"],
+              },
+            },
+            {
+              name: "getLeaderboard",
+              description: "Get top users or LPs by performance",
+              inputSchema: {
+                type: "object",
+                properties: {
+                  type: { type: "string", enum: ["users", "lps"], description: "Leaderboard type" },
+                  first: { type: "integer", minimum: 1, maximum: 100, default: 10 },
+                },
+                required: ["type"],
+              },
+            },
+            {
+              name: "getHourlyStats",
+              description: "Get hourly protocol statistics",
+              inputSchema: {
+                type: "object",
+                properties: {
+                  startTime: { type: "string", description: "Start timestamp" },
+                  endTime: { type: "string", description: "End timestamp" },
+                  first: { type: "integer", minimum: 1, maximum: 1000, default: 24 },
+                },
+              },
+            },
+          ],
+        };
+      }
+    );
+    return handler(_request);
   }
 
   private async handleListResources(_request: ListResourcesRequest) {
@@ -750,4 +940,11 @@ export async function main(): Promise<void> {
     }
     process.exit(1);
   }
+}
+
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main().catch((error) => {
+    console.error("Failed to start server:", error);
+    process.exit(1);
+  });
 }

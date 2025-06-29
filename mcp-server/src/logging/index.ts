@@ -88,20 +88,6 @@ function createPrettyConfig(): pino.TransportTargetOptions {
       ignore: "pid,hostname",
       messageFormat: "{requestId} {msg}",
       errorLikeObjectKeys: ["error", "err"],
-      customPrettifiers: {
-        time: (timestamp: string) => `🕐 ${timestamp}`,
-        level: (level: string) => {
-          const labels: Record<string, string> = {
-            10: "🔍 TRACE",
-            20: "🐛 DEBUG",
-            30: "ℹ️  INFO",
-            40: "⚠️  WARN",
-            50: "❌ ERROR",
-            60: "💀 FATAL",
-          };
-          return labels[level] || level;
-        },
-      },
     },
   };
 }
@@ -129,15 +115,22 @@ export function createLogger(customConfig?: Partial<Config>): pino.Logger {
   const config = customConfig ? { ...getConfig(), ...customConfig } : getConfig();
   const baseConfig = createBaseConfig(config);
 
+  const isStdioTransport = config.transport.type === "stdio";
+
   if (
     config.logging.pretty &&
     config.environment === "development" &&
-    process.env["NODE_ENV"] !== "test"
+    process.env["NODE_ENV"] !== "test" &&
+    !isStdioTransport
   ) {
     return pino({
       ...baseConfig,
       transport: createPrettyConfig(),
     });
+  }
+
+  if (isStdioTransport) {
+    return pino(baseConfig, pino.destination(2));
   }
 
   return pino(baseConfig);
