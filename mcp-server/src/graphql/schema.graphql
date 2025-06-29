@@ -1,0 +1,382 @@
+# ============================================
+# ENUMS
+# ============================================
+
+enum RoundStatus {
+  ACTIVE
+  DRAWING
+  RESOLVED
+}
+
+enum LpActionType {
+  DEPOSIT
+  WITHDRAWAL
+  RISK_ADJUSTMENT
+}
+
+enum FeeType {
+  LP_FEE
+  REFERRAL_FEE
+  PROTOCOL_FEE
+}
+
+enum WithdrawalType {
+  WINNINGS
+  REFERRAL_FEES
+  LP_PRINCIPAL
+  LP_STAKE
+  PROTOCOL_FEE
+}
+
+# ============================================
+# CORE TYPES
+# ============================================
+
+type User {
+  id: ID! # wallet address
+  ticketsPurchasedTotalBps: BigInt!
+  winningsClaimable: BigInt!
+  referralFeesClaimable: BigInt!
+  totalTicketsPurchased: BigInt!
+  totalWinnings: BigInt!
+  totalReferralFees: BigInt!
+  isActive: Boolean!
+  isLP: Boolean!
+  createdAt: Int!
+  updatedAt: Int!
+  
+  # Relations
+  tickets: [Ticket!]! # as buyer
+  receivedTickets: [Ticket!]! # as recipient
+  referredTickets: [Ticket!]! # as referrer
+  referralsGiven: [Referral!]!
+  referralsReceived: [Referral!]!
+  withdrawals: [Withdrawal!]!
+  feeDistributions: [FeeDistribution!]!
+}
+
+type LiquidityProvider {
+  id: ID! # wallet address
+  principal: BigInt!
+  stake: BigInt!
+  riskPercentage: Int!
+  isActive: Boolean!
+  totalDeposited: BigInt!
+  totalWithdrawn: BigInt!
+  totalFeesEarned: BigInt!
+  lastActionAt: Int!
+  createdAt: Int!
+  updatedAt: Int!
+  
+  # Relations
+  actions: [LpAction!]!
+  snapshots: [LpRoundSnapshot!]!
+}
+
+type JackpotRound {
+  id: ID! # round number as string
+  status: RoundStatus!
+  startTime: Int!
+  endTime: Int
+  totalTicketsValue: BigInt!
+  totalLpSupplied: BigInt!
+  jackpotAmount: BigInt!
+  ticketCountTotalBps: BigInt!
+  randomNumber: String # bytes32 as hex
+  winnerAddress: String
+  winningTicketNumber: BigInt
+  lpFeesGenerated: BigInt!
+  referralFeesGenerated: BigInt!
+  protocolFeesGenerated: BigInt!
+  createdAt: Int!
+  updatedAt: Int!
+  
+  # Relations
+  tickets: [Ticket!]!
+  lpSnapshots: [LpRoundSnapshot!]!
+  feeDistributions: [FeeDistribution!]!
+}
+
+# ============================================
+# TRANSACTIONAL TYPES
+# ============================================
+
+type Ticket {
+  id: ID! # {txHash}-{logIndex}
+  roundId: String!
+  buyerAddress: String!
+  recipientAddress: String!
+  referrerAddress: String
+  ticketsPurchasedBps: BigInt!
+  purchasePrice: BigInt!
+  transactionHash: String!
+  blockNumber: BigInt!
+  timestamp: Int!
+  
+  # Relations
+  round: JackpotRound!
+  buyer: User!
+  recipient: User!
+  referrer: User
+}
+
+type LpAction {
+  id: ID! # {txHash}-{logIndex}
+  lpAddress: String!
+  actionType: LpActionType!
+  amount: BigInt
+  riskPercentage: Int
+  effectiveRoundId: String
+  transactionHash: String!
+  blockNumber: BigInt!
+  timestamp: Int!
+  
+  # Relations
+  liquidityProvider: LiquidityProvider!
+  effectiveRound: JackpotRound
+}
+
+type LpRoundSnapshot {
+  id: ID! # {lpAddress}-{roundId}
+  lpAddress: String!
+  roundId: String!
+  beginningPrincipal: BigInt!
+  beginningStake: BigInt!
+  endingPrincipal: BigInt!
+  endingStake: BigInt!
+  activeRiskPercentage: Int!
+  feesEarned: BigInt!
+  profitLoss: BigInt! # can be negative
+  createdAt: Int!
+  
+  # Relations
+  liquidityProvider: LiquidityProvider!
+  round: JackpotRound!
+}
+
+type FeeDistribution {
+  id: ID! # {txHash}-{logIndex} or synthetic
+  roundId: String!
+  recipientAddress: String!
+  amount: BigInt!
+  feeType: FeeType!
+  transactionHash: String
+  blockNumber: BigInt
+  timestamp: Int!
+  
+  # Relations
+  round: JackpotRound!
+  recipient: User!
+}
+
+type Referral {
+  id: ID! # {referrerAddress}-{referredAddress}
+  referrerAddress: String!
+  referredAddress: String!
+  totalTicketsPurchased: BigInt!
+  totalFeesGenerated: BigInt!
+  firstPurchaseAt: Int!
+  lastPurchaseAt: Int!
+  createdAt: Int!
+  updatedAt: Int!
+  
+  # Relations
+  referrer: User!
+  referred: User!
+}
+
+type Withdrawal {
+  id: ID! # {txHash}-{logIndex}
+  userAddress: String!
+  amount: BigInt!
+  withdrawalType: WithdrawalType!
+  transactionHash: String!
+  blockNumber: BigInt!
+  timestamp: Int!
+  
+  # Relations
+  user: User!
+}
+
+type HourlyStat {
+  id: ID! # {timestamp_hour}
+  hourTimestamp: Int!
+  totalTicketsSold: BigInt!
+  totalTicketsValue: BigInt!
+  uniquePlayers: Int!
+  totalLpDeposits: BigInt!
+  totalLpWithdrawals: BigInt!
+  totalLpFeesGenerated: BigInt!
+  totalReferralFeesGenerated: BigInt!
+  totalProtocolFeesGenerated: BigInt!
+  roundsCompleted: Int!
+  createdAt: Int!
+  updatedAt: Int!
+}
+
+# ============================================
+# QUERIES
+# ============================================
+
+type Query {
+  # Single entity queries
+  user(id: ID!): User
+  liquidityProvider(id: ID!): LiquidityProvider
+  jackpotRound(id: ID!): JackpotRound
+  ticket(id: ID!): Ticket
+  
+  # List queries with filters
+  users(
+    first: Int
+    skip: Int
+    where: UserFilter
+    orderBy: UserOrderBy
+    orderDirection: OrderDirection
+  ): [User!]!
+  
+  liquidityProviders(
+    first: Int
+    skip: Int
+    where: LiquidityProviderFilter
+    orderBy: LiquidityProviderOrderBy
+    orderDirection: OrderDirection
+  ): [LiquidityProvider!]!
+  
+  jackpotRounds(
+    first: Int
+    skip: Int
+    where: JackpotRoundFilter
+    orderBy: JackpotRoundOrderBy
+    orderDirection: OrderDirection
+  ): [JackpotRound!]!
+  
+  tickets(
+    first: Int
+    skip: Int
+    where: TicketFilter
+    orderBy: TicketOrderBy
+    orderDirection: OrderDirection
+  ): [Ticket!]!
+  
+  # Analytics queries
+  currentRound: JackpotRound
+  lpLeaderboard(first: Int): [LiquidityProvider!]!
+  userLeaderboard(first: Int): [User!]!
+  hourlyStats(
+    startTime: Int
+    endTime: Int
+    first: Int
+  ): [HourlyStat!]!
+  
+  # Aggregated stats
+  protocolStats: ProtocolStats!
+  lpStats(address: String!): LpStats!
+  userStats(address: String!): UserStats!
+}
+
+# ============================================
+# FILTERS & ORDERING
+# ============================================
+
+input UserFilter {
+  isActive: Boolean
+  isLP: Boolean
+  totalWinnings_gt: BigInt
+  totalTicketsPurchased_gt: BigInt
+}
+
+input LiquidityProviderFilter {
+  isActive: Boolean
+  stake_gt: BigInt
+  riskPercentage_gte: Int
+  riskPercentage_lte: Int
+}
+
+input JackpotRoundFilter {
+  status: RoundStatus
+  startTime_gte: Int
+  startTime_lte: Int
+  jackpotAmount_gt: BigInt
+}
+
+input TicketFilter {
+  roundId: String
+  buyerAddress: String
+  recipientAddress: String
+  referrerAddress: String
+  timestamp_gte: Int
+  timestamp_lte: Int
+}
+
+enum UserOrderBy {
+  totalWinnings
+  totalTicketsPurchased
+  totalReferralFees
+  createdAt
+}
+
+enum LiquidityProviderOrderBy {
+  stake
+  totalFeesEarned
+  totalDeposited
+  riskPercentage
+  createdAt
+}
+
+enum JackpotRoundOrderBy {
+  startTime
+  jackpotAmount
+  totalTicketsValue
+  totalLpSupplied
+}
+
+enum TicketOrderBy {
+  timestamp
+  blockNumber
+  ticketsPurchasedBps
+}
+
+enum OrderDirection {
+  asc
+  desc
+}
+
+# ============================================
+# AGGREGATED TYPES
+# ============================================
+
+type ProtocolStats {
+  totalTicketsSold: BigInt!
+  totalJackpotsPaid: BigInt!
+  totalLpDeposited: BigInt!
+  totalLpFeesGenerated: BigInt!
+  totalReferralFeesGenerated: BigInt!
+  totalProtocolFeesGenerated: BigInt!
+  activeUsers: Int!
+  activeLps: Int!
+  totalRounds: Int!
+  currentRoundId: String!
+}
+
+type LpStats {
+  address: String!
+  currentPrincipal: BigInt!
+  currentStake: BigInt!
+  totalDeposited: BigInt!
+  totalWithdrawn: BigInt!
+  totalFeesEarned: BigInt!
+  averageAPY: Float!
+  roundsParticipated: Int!
+  winRate: Float!
+}
+
+type UserStats {
+  address: String!
+  totalTicketsPurchased: BigInt!
+  totalSpent: BigInt!
+  totalWon: BigInt!
+  totalReferralEarnings: BigInt!
+  winRate: Float!
+  roundsPlayed: Int!
+  referralsCount: Int!
+}
