@@ -48,6 +48,8 @@ import {
 import { MegapotGraphQLClient, getGraphQLClient } from "./graphql/index.js";
 import { MCPError, mapGraphQLError } from "./errors/index.js";
 import { buildResourceUri, parseResourceUri, type MegapotResponse } from "./types/index.js";
+import { validateMCPToolCall } from "./validation/index.js";
+import { executeTool } from "./tools/index.js";
 
 const SUPPORTED_PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26"] as const;
 
@@ -454,55 +456,45 @@ export class MegapotMCPServer extends Server {
         );
 
         try {
-          let result: any;
+          const { toolName, validatedParams } = await validateMCPToolCall(req);
 
-          switch (req.params.name) {
-            case "queryUsers":
-              result = await this.graphqlClient.query(
-                "query { users(first: 10) { id address totalTicketsPurchased totalWinnings } }"
-              );
-              break;
-            case "queryRounds":
-              result = await this.graphqlClient.query(
-                "query { jackpotRounds(first: 10, orderBy: roundNumber, orderDirection: desc) { id roundNumber status jackpotAmount } }"
-              );
-              break;
-            case "queryTickets":
-              result = await this.graphqlClient.query(
-                "query { tickets(first: 10, orderBy: ticketNumber, orderDirection: desc) { id ticketNumber buyer recipient } }"
-              );
-              break;
-            case "queryLPs":
-              result = await this.graphqlClient.query(
-                "query { liquidityProviders(first: 10) { id address stake isActive } }"
-              );
-              break;
-            case "getCurrentRound":
-              result = await this.graphqlClient.query(
-                'query { jackpotRounds(where: { status: "OPEN" }, first: 1) { id roundNumber status jackpotAmount ticketsSold } }'
-              );
-              break;
-            case "getProtocolStats":
-              result = await this.graphqlClient.query(
-                "query { hourlyStats(orderBy: timestamp, orderDirection: desc, first: 1) { timestamp totalVolume uniqueUsers } }"
-              );
-              break;
-            default:
-              throw new MCPError(1002, `Unknown tool: ${req.params.name}`, {
-                tool: req.params.name,
-              });
-          }
+          logger.debug(
+            {
+              toolName,
+              validatedParams,
+            },
+            "Tool parameters validated successfully"
+          );
+
+          const result = await executeTool(this.graphqlClient, toolName, validatedParams);
+
+          const response: MegapotResponse<any> = {
+            data: result,
+            metadata: {
+              timestamp: Date.now(),
+              totalCount: Array.isArray(result?.data) ? result.data.length : 1,
+            },
+          };
 
           return {
             content: [
               {
                 type: "text" as const,
-                text: JSON.stringify(result, null, 2),
+                text: JSON.stringify(response, null, 2),
               },
             ],
           };
         } catch (error) {
           if (error instanceof MCPError) {
+            logger.error(
+              {
+                error: error.message,
+                code: error.code,
+                tool: req.params.name,
+                details: error.details,
+              },
+              "Tool call failed"
+            );
             throw error;
           }
 

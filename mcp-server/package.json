@@ -30,7 +30,10 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^0.6.1",
+    "@types/json-schema": "^7.0.15",
     "@types/uuid": "^10.0.0",
+    "ajv": "^8.17.1",
+    "ajv-formats": "^3.0.1",
     "graphql": "^16.9.0",
     "graphql-query-complexity": "^1.1.0",
     "graphql-request": "^7.2.0",

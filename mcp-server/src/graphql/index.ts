@@ -22,6 +22,12 @@ export {
 } from "./complexity.js";
 
 export {
+  DisconnectionBuffer,
+  type BufferedUpdate,
+  type DisconnectionBufferConfig,
+} from "./disconnection-buffer.js";
+
+export {
   USER_FIELDS,
   LP_FIELDS,
   ROUND_FIELDS,

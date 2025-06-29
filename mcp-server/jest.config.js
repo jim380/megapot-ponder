@@ -22,6 +22,7 @@ export default {
   transformIgnorePatterns: [
     'node_modules/(?!(@modelcontextprotocol|graphql-request|graphql-ws|ws|graphql)/)'
   ],
+  moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'json', 'node'],
   collectCoverageFrom: [
     'src/**/*.ts',
     '!src/**/*.d.ts',

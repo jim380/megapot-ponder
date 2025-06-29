@@ -94,6 +94,16 @@ export class GraphQLTimeoutError extends MCPError {
   }
 }
 
+export class WebSocketDisconnectionError extends MCPError {
+  constructor(outageMs: number, subscriptionCount: number, bufferSize: number) {
+    super(1105, `WebSocket outage exceeded buffer duration: ${outageMs}ms with ${subscriptionCount} subscriptions (${bufferSize} buffered updates)`, {
+      outageMs,
+      subscriptionCount,
+      bufferSize,
+    });
+  }
+}
+
 export class InvalidParametersError extends MCPError {
   constructor(paramName: string, reason: string, value?: unknown) {
     super(1200, `Invalid parameter '${paramName}': ${reason}`, { paramName, reason, value });

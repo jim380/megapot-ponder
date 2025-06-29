@@ -1,10 +1,16 @@
 import { GraphQLClient, gql, type Variables } from "graphql-request";
 import { createClient, type Client as WSClient } from "graphql-ws";
-import WebSocket from "ws";
+import * as WebSocket from "ws";
 import { type DocumentNode, print, parse } from "graphql";
 import { getConfig } from "../config/index.js";
 import { getLogger, createTimer } from "../logging/index.js";
 import { getSessionManager } from "../sessions/manager.js";
+import {
+  DisconnectionBuffer,
+  type BufferedUpdate,
+  type DisconnectionBufferConfig,
+} from "./disconnection-buffer.js";
+import { WebSocketDisconnectionError } from "../errors/index.js";
 import {
   calculateQueryComplexity,
   validateQueryComplexity,
@@ -65,6 +71,8 @@ interface WSConnectionState {
       handler: SubscriptionHandler;
       debounceTimer?: NodeJS.Timeout;
       lastData?: any;
+      onError?: (error: Error) => void;
+      onComplete?: () => void;
     }
   >;
 }
@@ -82,6 +90,8 @@ export class MegapotGraphQLClient {
   private reconnectTimeout: NodeJS.Timeout | null = null;
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 5;
+  private disconnectionBuffer!: DisconnectionBuffer;
+  private lastDisconnectTime = 0;
 
   constructor(config?: Partial<GraphQLClientConfig>) {
     const appConfig = getConfig();
@@ -99,6 +109,7 @@ export class MegapotGraphQLClient {
 
     this.initializeConnectionPool();
     this.startHealthCheck();
+    this.initializeDisconnectionBuffer();
   }
 
   private initializeConnectionPool(): void {
@@ -123,6 +134,67 @@ export class MegapotGraphQLClient {
       },
       "GraphQL connection pool initialized"
     );
+  }
+
+  private initializeDisconnectionBuffer(): void {
+    const bufferConfig: Partial<DisconnectionBufferConfig> = {
+      bufferDurationMs: 30_000,
+      cleanupTimeoutMs: 35_000,
+      maxUpdatesPerSubscription: 100,
+      maxTotalUpdates: 1000,
+    };
+
+    this.disconnectionBuffer = new DisconnectionBuffer(bufferConfig);
+
+    this.disconnectionBuffer.on("extendedOutage", (outageMs, subscriptionCount) => {
+      const error = new WebSocketDisconnectionError(
+        outageMs,
+        subscriptionCount,
+        this.disconnectionBuffer.getBufferStats().totalUpdates
+      );
+
+      Array.from(this.wsState.subscriptions.entries()).forEach(([, subscription]) => {
+        if (subscription.onError) {
+          subscription.onError(error);
+        } else {
+          subscription.handler(undefined as any, error);
+        }
+      });
+
+      const sessionManager = getSessionManager();
+      const activeSessions = sessionManager.getActiveSessions();
+
+      for (const session of activeSessions) {
+        if (session.websocket) {
+          sessionManager.emit("error", session.id, error);
+        }
+      }
+
+      logger.error(
+        {
+          outageMs,
+          subscriptionCount,
+          sessionCount: activeSessions.length,
+        },
+        "Extended WebSocket outage error propagated to MCP layer"
+      );
+    });
+
+    this.disconnectionBuffer.on("bufferingStarted", (subscriptionCount) => {
+      logger.info({ subscriptionCount }, "Disconnection buffering started");
+    });
+
+    this.disconnectionBuffer.on("updatesReplayed", (updateCount, subscriptionCount) => {
+      logger.info({ updateCount, subscriptionCount }, "Buffered updates replayed");
+    });
+
+    this.disconnectionBuffer.on("bufferCleared", (reason, updateCount) => {
+      logger.warn({ reason, updateCount }, "Disconnection buffer cleared");
+    });
+
+    this.disconnectionBuffer.on("bufferOverflow", (droppedUpdates) => {
+      logger.warn({ droppedUpdates }, "Disconnection buffer overflow");
+    });
   }
 
   private async getConnection(): Promise<PooledConnection> {
@@ -299,11 +371,42 @@ export class MegapotGraphQLClient {
             this.wsState.connected = true;
             this.wsState.connecting = false;
             this.reconnectAttempts = 0;
-            logger.info("WebSocket connected for subscriptions");
+
+            const outageMs = this.lastDisconnectTime > 0 ? Date.now() - this.lastDisconnectTime : 0;
+
+            if (this.disconnectionBuffer.isBufferingActive()) {
+              this.disconnectionBuffer.stopBuffering((subscriptionId, updates) => {
+                this.replayBufferedUpdates(subscriptionId, updates);
+              });
+            }
+
+            logger.info(
+              {
+                outageMs,
+                wasBuffering: this.disconnectionBuffer.isBufferingActive(),
+              },
+              "WebSocket connected for subscriptions"
+            );
+
+            this.lastDisconnectTime = 0;
           },
           closed: () => {
             this.wsState.connected = false;
-            logger.info("WebSocket connection closed");
+            this.lastDisconnectTime = Date.now();
+
+            const activeSubscriptionIds = Array.from(this.wsState.subscriptions.keys());
+            if (activeSubscriptionIds.length > 0 && !this.disconnectionBuffer.isBufferingActive()) {
+              this.disconnectionBuffer.startBuffering(activeSubscriptionIds);
+            }
+
+            logger.info(
+              {
+                activeSubscriptions: activeSubscriptionIds.length,
+                bufferingStarted: activeSubscriptionIds.length > 0,
+              },
+              "WebSocket connection closed"
+            );
+
             this.handleReconnect();
           },
           error: (error) => {
@@ -380,10 +483,25 @@ export class MegapotGraphQLClient {
     const wrappedHandler: SubscriptionHandler<T> =
       debounceMs > 0 ? this.createDebouncedHandler(subscriptionId, handler, debounceMs) : handler;
 
-    this.wsState.subscriptions.set(subscriptionId, {
+    const subscriptionData: {
+      handler: SubscriptionHandler;
+      debounceTimer?: NodeJS.Timeout;
+      lastData?: any;
+      onError?: (error: Error) => void;
+      onComplete?: () => void;
+    } = {
       handler: wrappedHandler,
       lastData: undefined,
-    });
+    };
+
+    if (options.onError) {
+      subscriptionData.onError = options.onError;
+    }
+    if (options.onComplete) {
+      subscriptionData.onComplete = options.onComplete;
+    }
+
+    this.wsState.subscriptions.set(subscriptionId, subscriptionData);
 
     const unsubscribe = this.wsState.client!.subscribe<T>(
       {
@@ -393,7 +511,11 @@ export class MegapotGraphQLClient {
       {
         next: (data) => {
           if (data.data) {
-            wrappedHandler(data.data);
+            if (this.disconnectionBuffer.isBufferingActive()) {
+              this.disconnectionBuffer.bufferUpdate(subscriptionId, data.data);
+            } else {
+              wrappedHandler(data.data);
+            }
           }
         },
         error: (error) => {
@@ -472,9 +594,73 @@ export class MegapotGraphQLClient {
     }
   }
 
+  private replayBufferedUpdates(subscriptionId: string, updates: BufferedUpdate[]): void {
+    const subscription = this.wsState.subscriptions.get(subscriptionId);
+    if (!subscription) {
+      logger.warn(
+        { subscriptionId, updateCount: updates.length },
+        "Cannot replay updates: subscription not found"
+      );
+      return;
+    }
+
+    logger.debug(
+      {
+        subscriptionId,
+        updateCount: updates.length,
+        firstTimestamp: updates[0]?.timestamp,
+        lastTimestamp: updates[updates.length - 1]?.timestamp,
+      },
+      "Replaying buffered subscription updates"
+    );
+
+    for (const update of updates) {
+      try {
+        subscription.handler(update.data);
+      } catch (error) {
+        logger.error(
+          {
+            subscriptionId,
+            sequenceNumber: update.sequenceNumber,
+            timestamp: update.timestamp,
+            error,
+          },
+          "Error replaying buffered update"
+        );
+      }
+    }
+  }
+
   getComplexity(query: string | DocumentNode): ComplexityResult {
     const queryDoc = typeof query === "string" ? parse(query) : query;
     return calculateQueryComplexity(queryDoc);
+  }
+
+  getConnectionStatus(): {
+    connected: boolean;
+    connecting: boolean;
+    subscriptionCount: number;
+    bufferStats: {
+      isBuffering: boolean;
+      outageMs: number;
+      totalUpdates: number;
+      subscriptionCount: number;
+      oldestUpdateAge: number;
+    };
+  } {
+    return {
+      connected: this.wsState.connected,
+      connecting: this.wsState.connecting,
+      subscriptionCount: this.wsState.subscriptions.size,
+      bufferStats: this.disconnectionBuffer.getBufferStats(),
+    };
+  }
+
+  clearDisconnectionBuffer(): void {
+    if (this.disconnectionBuffer.isBufferingActive()) {
+      this.disconnectionBuffer.clearBuffer("manual");
+      logger.info("Disconnection buffer manually cleared");
+    }
   }
 
   private startHealthCheck(): void {
@@ -511,11 +697,15 @@ export class MegapotGraphQLClient {
       await this.wsState.client.dispose();
     }
 
-    for (const [, sub] of this.wsState.subscriptions) {
+    if (this.disconnectionBuffer) {
+      this.disconnectionBuffer.dispose();
+    }
+
+    Array.from(this.wsState.subscriptions.values()).forEach((sub) => {
       if (sub.debounceTimer) {
         clearTimeout(sub.debounceTimer);
       }
-    }
+    });
     this.wsState.subscriptions.clear();
 
     this.connectionPool = [];

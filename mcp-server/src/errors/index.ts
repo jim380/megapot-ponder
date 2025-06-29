@@ -6,6 +6,8 @@ export {
   ResourceNotFoundError,
   GraphQLConnectionError,
   GraphQLQueryError,
+  GraphQLTimeoutError,
+  WebSocketDisconnectionError,
   InvalidParametersError,
   RateLimitExceededError,
   mapGraphQLError,
