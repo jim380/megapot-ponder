@@ -1,0 +1,32 @@
+overwrite: true
+schema: "../schema.graphql"
+documents:
+  - "./src/**/*.graphql"
+  - "./tests/fixtures/*.graphql"
+generates:
+  ./src/types/entities.ts:
+    plugins:
+      - typescript
+      - typescript-operations
+      - typescript-graphql-request
+    config:
+      scalars:
+        BigInt: string
+        BigDecimal: string
+        Bytes: string
+        Address: string
+      maybeValue: T | null
+      enumsAsTypes: true
+      strictScalars: true
+      addTypenameToOutputTypes: false
+      immutableTypes: false
+      namingConvention:
+        typeNames: pascalCase
+        enumValues: UPPER_CASE
+        fieldNames: camelCase
+      preResolveTypes: true
+      inputMaybeValue: T | null | undefined
+      declarationKind: interface
+hooks:
+  afterOneFileWrite:
+    - prettier --write
