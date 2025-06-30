@@ -24,15 +24,15 @@ export interface ComplexityConfig {
 const DEFAULT_CONFIG: ComplexityConfig = {
   scalarCost: 1,
   objectCost: 2,
-  listFactor: 10,
-  depthFactor: 1.5,
+  listFactor: 2,
+  depthFactor: 1.2,
   introspectionCost: 1000,
   defaultListSize: 10,
   fieldCosts: {
     hourlyStats: 50,
     protocolStats: 100,
-    lpLeaderboard: 50,
-    userLeaderboard: 50,
+    lpLeaderboard: 25,
+    userLeaderboard: 25,
     lpStats: 25,
     userStats: 25,
 
@@ -187,22 +187,28 @@ function calculateSelectionSetComplexity(
       const fieldName = selection.name.value;
       const hasSelections = selection.selectionSet && selection.selectionSet.selections.length > 0;
 
+      let fieldScore = 0;
       if (config.fieldCosts && config.fieldCosts[fieldName]) {
         const customCost = config.fieldCosts[fieldName];
-        score += customCost;
+        fieldScore = customCost;
         customCosts[fieldName] = (customCosts[fieldName] || 0) + customCost;
       } else {
-        score += hasSelections ? config.objectCost : config.scalarCost;
+        fieldScore = hasSelections ? config.objectCost : config.scalarCost;
       }
 
-      score *= Math.pow(config.depthFactor, depth - 1);
+      const depthPenalty = fieldScore * (depth - 1) * (config.depthFactor - 1);
+      fieldScore += depthPenalty;
 
       const isList = isListField(selection);
       if (isList) {
         listFields++;
         const listSize = getListSize(selection, config.defaultListSize);
-        score *= config.listFactor * (listSize / config.defaultListSize);
+
+        const listPenalty = fieldScore * config.listFactor * (listSize / config.defaultListSize);
+        fieldScore += listPenalty;
       }
+
+      score += fieldScore;
 
       if (hasSelections && selection.selectionSet) {
         const nestedComplexity = calculateSelectionSetComplexity(

@@ -1,3 +1,95 @@
+async function setupNodeFetchPolyfills() {
+  if (typeof globalThis.fetch === "undefined" || typeof globalThis.Headers === "undefined") {
+    if (typeof globalThis.Headers === "undefined") {
+      globalThis.Headers = createCustomHeaders();
+    }
+
+    if (typeof globalThis.fetch === "undefined") {
+      try {
+        const nodeFetch = await import("node-fetch");
+        globalThis.fetch = nodeFetch.default as any;
+      } catch (importError) {
+        console.warn("Could not import node-fetch:", (importError as Error).message);
+
+        globalThis.fetch = async function (url: string) {
+          throw new Error(
+            `fetch not available: Cannot make request to ${url}. node-fetch could not be loaded.`
+          );
+        } as any;
+      }
+    }
+  }
+}
+
+function createCustomHeaders() {
+  return class Headers {
+    private headers: Map<string, string> = new Map();
+
+    constructor(init?: any) {
+      if (init) {
+        if (Array.isArray(init)) {
+          for (const [key, value] of init) {
+            this.headers.set(key.toLowerCase(), String(value));
+          }
+        } else if (typeof init === "object") {
+          for (const [key, value] of Object.entries(init)) {
+            this.headers.set(key.toLowerCase(), String(value));
+          }
+        }
+      }
+    }
+
+    append(name: string, value: string) {
+      const existing = this.headers.get(name.toLowerCase());
+      if (existing) {
+        this.headers.set(name.toLowerCase(), `${existing}, ${value}`);
+      } else {
+        this.headers.set(name.toLowerCase(), value);
+      }
+    }
+
+    delete(name: string) {
+      this.headers.delete(name.toLowerCase());
+    }
+
+    get(name: string): string | null {
+      return this.headers.get(name.toLowerCase()) || null;
+    }
+
+    has(name: string): boolean {
+      return this.headers.has(name.toLowerCase());
+    }
+
+    set(name: string, value: string) {
+      this.headers.set(name.toLowerCase(), value);
+    }
+
+    *[Symbol.iterator]() {
+      for (const [key, value] of this.headers) {
+        yield [key, value];
+      }
+    }
+
+    forEach(callback: (value: string, key: string, parent: Headers) => void) {
+      for (const [key, value] of this.headers) {
+        callback(value, key, this);
+      }
+    }
+
+    keys() {
+      return this.headers.keys();
+    }
+
+    values() {
+      return this.headers.values();
+    }
+
+    entries() {
+      return this.headers.entries();
+    }
+  } as any;
+}
+
 import { GraphQLClient, gql, type Variables } from "graphql-request";
 import { createClient, type Client as WSClient } from "graphql-ws";
 import * as WebSocket from "ws";
@@ -92,6 +184,7 @@ export class MegapotGraphQLClient {
   private maxReconnectAttempts = 5;
   private disconnectionBuffer!: DisconnectionBuffer;
   private lastDisconnectTime = 0;
+  private polyfillsInitialized = false;
 
   constructor(config?: Partial<GraphQLClientConfig>) {
     const appConfig = getConfig();
@@ -134,6 +227,13 @@ export class MegapotGraphQLClient {
       },
       "GraphQL connection pool initialized"
     );
+  }
+
+  private async ensurePolyfillsInitialized(): Promise<void> {
+    if (!this.polyfillsInitialized) {
+      await setupNodeFetchPolyfills();
+      this.polyfillsInitialized = true;
+    }
   }
 
   private initializeDisconnectionBuffer(): void {
@@ -243,9 +343,24 @@ export class MegapotGraphQLClient {
   }
 
   async query<T = any>(query: string | DocumentNode, options: QueryOptions = {}): Promise<T> {
+    await this.ensurePolyfillsInitialized();
+
+    logger.info("=== GraphQL Client query() START ===");
+    logger.info(
+      {
+        endpoint: this.config.endpoint,
+        queryType: typeof query,
+        options,
+        queryPreview: typeof query === "string" ? query.substring(0, 200) + "..." : "DocumentNode",
+      },
+      "GraphQL query request"
+    );
+
     const timer = createTimer();
     const queryDoc = typeof query === "string" ? parse(query) : query;
     const queryString = typeof query === "string" ? query : print(query);
+
+    logger.info({ queryString }, "Full query string to be sent");
 
     const sessionManager = getSessionManager();
     const session = options.sessionId ? sessionManager.getSession(options.sessionId) : undefined;
@@ -284,7 +399,20 @@ export class MegapotGraphQLClient {
 
     for (let attempt = 0; attempt < this.config.retryAttempts; attempt++) {
       try {
+        logger.info(
+          { attempt: attempt + 1, maxAttempts: this.config.retryAttempts },
+          "Query attempt"
+        );
+
         connection = await this.getConnection();
+        logger.debug(
+          {
+            connectionInUse: connection.inUse,
+            connectionErrors: connection.errorCount,
+            endpoint: this.config.endpoint,
+          },
+          "Got connection from pool"
+        );
 
         connection.client.setHeader("x-request-id", requestId);
         connection.client.setHeader("x-session-id", options.sessionId || "");
@@ -294,7 +422,25 @@ export class MegapotGraphQLClient {
           });
         }
 
+        logger.info(
+          {
+            requestId,
+            endpoint: this.config.endpoint,
+            variables: options.variables,
+          },
+          "Sending request to GraphQL endpoint"
+        );
+
         const result = await connection.client.request<T>(queryString, options.variables);
+
+        logger.info(
+          {
+            requestId,
+            resultKeys: result ? Object.keys(result) : [],
+            hasData: !!result,
+          },
+          "GraphQL request completed successfully"
+        );
 
         timer.log(logger, "GraphQL query executed", {
           requestId,
@@ -302,6 +448,7 @@ export class MegapotGraphQLClient {
           operationType: "query",
         });
 
+        logger.info("=== GraphQL Client query() SUCCESS ===");
         return result;
       } catch (error) {
         lastError = error as Error;
@@ -309,14 +456,21 @@ export class MegapotGraphQLClient {
           connection.errorCount++;
         }
 
-        logger.warn(
+        logger.error(
           {
             requestId,
             attempt: attempt + 1,
             error: lastError,
+            errorMessage: lastError.message,
+            errorStack: lastError.stack,
+            errorType: lastError.constructor.name,
             willRetry: attempt < this.config.retryAttempts - 1,
+            endpoint: this.config.endpoint,
+            responseBody: (error as any).response?.body,
+            responseStatus: (error as any).response?.status,
+            responseHeaders: (error as any).response?.headers,
           },
-          "GraphQL query failed"
+          "GraphQL query failed - detailed error info"
         );
 
         if (
@@ -324,13 +478,14 @@ export class MegapotGraphQLClient {
           lastError.message.includes("401") ||
           lastError.message.includes("403")
         ) {
+          logger.warn("Breaking retry loop due to client error (4xx)");
           break;
         }
 
         if (attempt < this.config.retryAttempts - 1) {
-          await new Promise((resolve) =>
-            setTimeout(resolve, this.config.retryDelay * Math.pow(2, attempt))
-          );
+          const delay = this.config.retryDelay * Math.pow(2, attempt);
+          logger.info({ delay }, "Waiting before retry");
+          await new Promise((resolve) => setTimeout(resolve, delay));
         }
       } finally {
         if (connection) {
@@ -345,10 +500,13 @@ export class MegapotGraphQLClient {
         requestId,
         attempts: this.config.retryAttempts,
         error: lastError,
+        errorMessage: lastError?.message,
+        endpoint: this.config.endpoint,
       },
       "GraphQL query failed after all retries"
     );
 
+    logger.info("=== GraphQL Client query() ERROR ===");
     throw lastError || new Error("Query failed");
   }
 

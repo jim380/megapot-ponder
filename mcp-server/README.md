@@ -1,6 +1,6 @@
 # Megapot MCP Server
 
-A MCP server for the megapot-ponder indexer.
+A MCP server for the megapot-ponder indexer that provides access to jackpot round data, user statistics, liquidity provider information, and protocol analytics.
 
 ## Setup
 
@@ -20,6 +20,7 @@ A MCP server for the megapot-ponder indexer.
 
    Edit `.env` file with your settings:
    - `GRAPHQL_ENDPOINT` - Ponder GraphQL endpoint (e.g., `http://localhost:42069/graphql`)
+   - `MAX_QUERY_COMPLEXITY` - GraphQL complexity limit (default: `10000`)
    - `MEGAPOT_MCP_TRANSPORT` - Transport type (`stdio` or `http`, default: `stdio`)
    - `MEGAPOT_MCP_PORT` - HTTP server port (default: `3001`)
    - `MEGAPOT_MCP_HOST` - HTTP server host (default: `0.0.0.0`)
@@ -47,7 +48,7 @@ A MCP server for the megapot-ponder indexer.
 3. **GraphQL Client Layer**
    - Connection pooling with automatic retry
    - WebSocket subscriptions with disconnection buffering
-   - Query complexity analysis (5000 cost unit ceiling)
+   - Query complexity analysis with improved additive scoring algorithm
 
 4. **Validation Layer**
    - JSON Schema definitions for all tools
@@ -141,7 +142,8 @@ curl http://localhost:3001/health | jq .
       "command": "node",
       "args": ["/path/to/megapot-ponder/mcp-server/dist/server.js"],
       "env": {
-        "GRAPHQL_ENDPOINT": "http://localhost:42069/graphql"
+        "GRAPHQL_ENDPOINT": "http://localhost:42069/graphql",
+        "MAX_QUERY_COMPLEXITY": "10000"
       }
     }
   }
@@ -333,6 +335,40 @@ await client.connect(transport);
 - **Port already in use**: Change the port using `MEGAPOT_MCP_PORT` environment variable
 - **GraphQL connection failed**: Ensure your indexer is running and the endpoint is correct in `.env`
 - **Rate limit exceeded**: The server limits to 10 requests per second per session
+- **"Query complexity exceeded" errors**: The improved complexity algorithm should handle most queries. If needed, increase `MAX_QUERY_COMPLEXITY` environment variable
+- **User queries returning empty results**: Make sure Ponder indexer is running and has indexed data
+- **"Field does not exist" errors**: Verify Ponder schema matches expected field names
+
+### Query Complexity Algorithm
+
+The MCP server uses an improved additive complexity scoring algorithm that:
+
+- Uses additive scoring instead of multiplicative to prevent exponential growth
+- Applies gentle depth penalties (1.2x factor per level)
+- Applies reasonable list penalties (2x base factor)
+- Allows normal queries with 10-1000 items and nested fields
+
+The default limit of 10000 should handle most queries. If you encounter complexity errors:
+
+1. **In Claude Desktop config**, increase the limit:
+
+   ```json
+   "env": {
+     "GRAPHQL_ENDPOINT": "http://localhost:42069/graphql",
+     "MAX_QUERY_COMPLEXITY": "20000"
+   }
+   ```
+
+2. **For direct execution**, set the environment variable:
+
+   ```bash
+   MAX_QUERY_COMPLEXITY=20000 npm run start
+   ```
+
+3. **In your .env file**, add:
+   ```
+   MAX_QUERY_COMPLEXITY=20000
+   ```
 
 ## Error Handling
 

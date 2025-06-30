@@ -116,7 +116,7 @@ export function loadConfig(): Config {
       endpoint: env["GRAPHQL_ENDPOINT"] || "http://localhost:42069/graphql",
       wsEndpoint: env["GRAPHQL_WS_ENDPOINT"] || "ws://localhost:42069/graphql",
       maxQueryDepth: validateNumber(env["MAX_QUERY_DEPTH"], 10, "MAX_QUERY_DEPTH"),
-      maxQueryComplexity: validateNumber(env["MAX_QUERY_COMPLEXITY"], 5000, "MAX_QUERY_COMPLEXITY"),
+      maxQueryComplexity: validateNumber(env["MAX_QUERY_COMPLEXITY"], 10000, "MAX_QUERY_COMPLEXITY"),
       timeout: validateNumber(env["GRAPHQL_TIMEOUT_MS"], 30000, "GRAPHQL_TIMEOUT_MS"),
       connectionPoolSize: validateNumber(env["GRAPHQL_POOL_SIZE"], 5, "GRAPHQL_POOL_SIZE"),
     },

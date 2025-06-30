@@ -14,23 +14,32 @@ import { serverLogger as logger } from "../logging/index.js";
 import { MCPError } from "../errors/index.js";
 
 function buildQueryArgs(params: any): string {
+  logger.debug("=== buildQueryArgs START ===");
+  logger.debug({ params }, "Input parameters to buildQueryArgs");
+
   const args: string[] = [];
 
   if (params.first !== undefined) {
-    args.push(`first: ${params.first}`);
+    logger.debug({ first: params.first }, "Adding limit argument");
+    args.push(`limit: ${params.first}`);
   }
+
   if (params.skip !== undefined) {
-    args.push(`skip: ${params.skip}`);
+    logger.debug({ skip: params.skip }, "Adding offset argument");
+    args.push(`offset: ${params.skip}`);
   }
 
   if (params.orderBy !== undefined) {
-    args.push(`orderBy: ${params.orderBy}`);
+    logger.debug({ orderBy: params.orderBy }, "Adding orderBy argument");
+    args.push(`orderBy: "${params.orderBy}"`);
   }
   if (params.orderDirection !== undefined) {
-    args.push(`orderDirection: ${params.orderDirection}`);
+    logger.debug({ orderDirection: params.orderDirection }, "Adding orderDirection argument");
+    args.push(`orderDirection: "${params.orderDirection}"`);
   }
 
   if (params.where && Object.keys(params.where).length > 0) {
+    logger.debug({ where: params.where }, "Processing where clause");
     const whereArgs = Object.entries(params.where)
       .filter(([_, value]) => value !== undefined)
       .map(([key, value]) => {
@@ -41,35 +50,72 @@ function buildQueryArgs(params: any): string {
       });
 
     if (whereArgs.length > 0) {
+      logger.debug({ whereArgs }, "Adding where clause");
       args.push(`where: { ${whereArgs.join(", ")} }`);
     }
   }
 
-  return args.length > 0 ? `(${args.join(", ")})` : "";
+  const result = args.length > 0 ? `(${args.join(", ")})` : "";
+  logger.debug({ result, argsCount: args.length }, "=== buildQueryArgs END ===");
+  return result;
 }
 
 export async function executeQueryUsers(
   client: MegapotGraphQLClient,
   params: QueryUsersParams
 ): Promise<any> {
+  logger.info("=== START executeQueryUsers ===");
+  logger.info({ params }, "Input parameters");
+
   const args = buildQueryArgs(params);
+  logger.info({ args }, "Built query arguments");
+
   const query = `
     query {
-      users${args} {
-        id
-        address
-        totalTicketsPurchased
-        totalWinnings
-        totalReferralFees
-        isActive
-        isLP
-        createdAt
+      userss${args} {
+        items {
+          id
+          totalTicketsPurchased
+          totalWinnings
+          totalReferralFees
+          isActive
+          isLP
+          createdAt
+        }
+        totalCount
       }
     }
   `;
 
-  logger.debug({ query, params }, "Executing queryUsers");
-  return await client.query(query);
+  logger.info({ query }, "Final GraphQL query");
+
+  try {
+    logger.debug("About to call client.query()");
+    const result = await client.query(query);
+    logger.info({ result }, "Raw GraphQL response");
+
+    const transformed = {
+      users: result.userss?.items || [],
+      totalCount: result.userss?.totalCount || 0,
+    };
+
+    logger.info({ transformed }, "Transformed response");
+    logger.info("=== END executeQueryUsers SUCCESS ===");
+
+    return transformed;
+  } catch (error) {
+    logger.error(
+      {
+        error,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        errorStack: error instanceof Error ? error.stack : undefined,
+        errorType: error?.constructor?.name,
+      },
+      "GraphQL query failed in executeQueryUsers"
+    );
+    logger.info("=== END executeQueryUsers ERROR ===");
+    throw error;
+  }
 }
 
 export async function executeQueryRounds(
@@ -79,24 +125,38 @@ export async function executeQueryRounds(
   const args = buildQueryArgs(params);
   const query = `
     query {
-      jackpotRounds${args} {
-        id
-        roundNumber
-        status
-        jackpotAmount
-        totalTicketsValue
-        totalLpSupplied
-        startTime
-        endTime
-        winnerAddress
-        ticketsSold
-        createdAt
+      jackpotRoundss${args} {
+        items {
+          id
+          status
+          jackpotAmount
+          totalTicketsValue
+          totalLpSupplied
+          startTime
+          endTime
+          winnerAddress
+          ticketCountTotalBps
+          createdAt
+        }
+        totalCount
       }
     }
   `;
 
   logger.debug({ query, params }, "Executing queryRounds");
-  return await client.query(query);
+  const result = await client.query(query);
+
+  const rounds =
+    result.jackpotRoundss?.items?.map((round: any) => ({
+      ...round,
+      roundNumber: round.id,
+      ticketsSold: round.ticketCountTotalBps,
+    })) || [];
+
+  return {
+    jackpotRounds: rounds,
+    totalCount: result.jackpotRoundss?.totalCount || 0,
+  };
 }
 
 export async function executeQueryTickets(
@@ -106,23 +166,40 @@ export async function executeQueryTickets(
   const args = buildQueryArgs(params);
   const query = `
     query {
-      tickets${args} {
-        id
-        ticketNumber
-        buyer
-        recipient
-        referrer
-        roundId
-        timestamp
-        blockNumber
-        ticketsPurchasedBps
-        transactionHash
+      ticketss${args} {
+        items {
+          id
+          buyerAddress
+          recipientAddress
+          referrerAddress
+          roundId
+          timestamp
+          blockNumber
+          ticketsPurchasedBps
+          purchasePrice
+          transactionHash
+        }
+        totalCount
       }
     }
   `;
 
   logger.debug({ query, params }, "Executing queryTickets");
-  return await client.query(query);
+  const result = await client.query(query);
+
+  const tickets =
+    result.ticketss?.items?.map((ticket: any) => ({
+      ...ticket,
+      buyer: ticket.buyerAddress,
+      recipient: ticket.recipientAddress,
+      referrer: ticket.referrerAddress,
+      ticketNumber: ticket.id,
+    })) || [];
+
+  return {
+    tickets: tickets,
+    totalCount: result.ticketss?.totalCount || 0,
+  };
 }
 
 export async function executeQueryLPs(
@@ -132,61 +209,111 @@ export async function executeQueryLPs(
   const args = buildQueryArgs(params);
   const query = `
     query {
-      liquidityProviders${args} {
-        id
-        address
-        stake
-        totalFeesEarned
-        totalDeposited
-        riskPercentage
-        isActive
-        createdAt
+      liquidityProviderss${args} {
+        items {
+          id
+          stake
+          totalFeesEarned
+          totalDeposited
+          riskPercentage
+          isActive
+          createdAt
+        }
+        totalCount
       }
     }
   `;
 
   logger.debug({ query, params }, "Executing queryLPs");
-  return await client.query(query);
+  const result = await client.query(query);
+
+  const lps =
+    result.liquidityProviderss?.items?.map((lp: any) => ({
+      ...lp,
+      address: lp.id,
+    })) || [];
+
+  return {
+    liquidityProviders: lps,
+    totalCount: result.liquidityProviderss?.totalCount || 0,
+  };
 }
 
 export async function executeGetCurrentRound(client: MegapotGraphQLClient): Promise<any> {
   const query = `
     query {
-      jackpotRounds(where: { status: "ACTIVE" }, first: 1, orderBy: startTime, orderDirection: desc) {
-        id
-        roundNumber
-        status
-        jackpotAmount
-        totalTicketsValue
-        totalLpSupplied
-        startTime
-        ticketsSold
-        createdAt
+      jackpotRoundss(where: { status: "ACTIVE" }, limit: 1, orderBy: "startTime", orderDirection: "desc") {
+        items {
+          id
+          status
+          jackpotAmount
+          totalTicketsValue
+          totalLpSupplied
+          startTime
+          ticketCountTotalBps
+          createdAt
+        }
+        totalCount
       }
     }
   `;
 
   logger.debug({ query }, "Executing getCurrentRound");
-  return await client.query(query);
+  const result = await client.query(query);
+
+  const round = result.jackpotRoundss?.items?.[0];
+  if (round) {
+    return {
+      jackpotRounds: [
+        {
+          ...round,
+          roundNumber: round.id,
+          ticketsSold: round.ticketCountTotalBps,
+        },
+      ],
+    };
+  }
+  return { jackpotRounds: [] };
 }
 
 export async function executeGetProtocolStats(client: MegapotGraphQLClient): Promise<any> {
   const query = `
     query {
-      hourlyStats(orderBy: timestamp, orderDirection: desc, first: 1) {
-        timestamp
-        totalVolume
-        uniqueUsers
-        totalRounds
-        activeUsers
-        totalTicketsSold
-        averageTicketPrice
+      hourlyStatss(orderBy: "hourTimestamp", orderDirection: "desc", limit: 1) {
+        items {
+          hourTimestamp
+          totalTicketsValue
+          uniquePlayers
+          roundsCompleted
+          totalTicketsSold
+          totalLpFeesGenerated
+          totalReferralFeesGenerated
+          totalProtocolFeesGenerated
+        }
+        totalCount
       }
     }
   `;
 
   logger.debug({ query }, "Executing getProtocolStats");
-  return await client.query(query);
+  const result = await client.query(query);
+
+  const stats = result.hourlyStatss?.items?.[0];
+  if (stats) {
+    return {
+      hourlyStats: [
+        {
+          ...stats,
+          timestamp: stats.hourTimestamp,
+          totalVolume: stats.totalTicketsValue,
+          uniqueUsers: stats.uniquePlayers,
+          totalRounds: stats.roundsCompleted,
+          activeUsers: stats.uniquePlayers,
+        },
+      ],
+    };
+  }
+  return { hourlyStats: [] };
 }
 
 export async function executeGetUserStats(
@@ -195,32 +322,70 @@ export async function executeGetUserStats(
 ): Promise<any> {
   const query = `
     query {
-      user(id: "${params.address}") {
+      users(where: { id: "${params.address}" }) {
         id
-        address
         totalTicketsPurchased
         totalWinnings
         totalReferralFees
         isActive
         isLP
         createdAt
-        tickets(orderBy: timestamp, orderDirection: desc, first: 10) {
-          id
-          ticketNumber
-          roundId
-          timestamp
-        }
-        referrals(first: 10) {
-          id
-          referredUser
-          totalFees
-        }
       }
     }
   `;
 
   logger.debug({ query, params }, "Executing getUserStats");
-  return await client.query(query);
+  const result = await client.query(query);
+
+  const ticketsQuery = `
+    query {
+      ticketss(where: { buyerAddress: "${params.address}" }, orderBy: "timestamp", orderDirection: "desc", limit: 10) {
+        items {
+          id
+          roundId
+          timestamp
+        }
+      }
+    }
+  `;
+
+  const ticketsResult = await client.query(ticketsQuery);
+
+  const referralsQuery = `
+    query {
+      referralss(where: { referrerAddress: "${params.address}" }, limit: 10) {
+        items {
+          id
+          referredAddress
+          totalFeesGenerated
+        }
+      }
+    }
+  `;
+
+  const referralsResult = await client.query(referralsQuery);
+
+  const user = result.users?.[0];
+  if (user) {
+    return {
+      user: {
+        ...user,
+        address: user.id,
+        tickets:
+          ticketsResult.ticketss?.items?.map((ticket: any) => ({
+            ...ticket,
+            ticketNumber: ticket.id,
+          })) || [],
+        referrals:
+          referralsResult.referralss?.items?.map((referral: any) => ({
+            ...referral,
+            referredUser: referral.referredAddress,
+            totalFees: referral.totalFeesGenerated,
+          })) || [],
+      },
+    };
+  }
+  return { user: null };
 }
 
 export async function executeGetLpStats(
@@ -229,22 +394,29 @@ export async function executeGetLpStats(
 ): Promise<any> {
   const query = `
     query {
-      liquidityProvider(id: "${params.address}") {
-        id
-        address
-        stake
-        totalFeesEarned
-        totalDeposited
-        riskPercentage
-        isActive
-        createdAt
-        deposits(orderBy: timestamp, orderDirection: desc, first: 10) {
+      liquidityProviderss(where: { id: "${params.address}" }) {
+        items {
           id
-          amount
-          timestamp
+          stake
+          totalFeesEarned
+          totalDeposited
+          riskPercentage
+          isActive
+          createdAt
         }
-        withdrawals(orderBy: timestamp, orderDirection: desc, first: 10) {
+      }
+    }
+  `;
+
+  logger.debug({ query, params }, "Executing getLpStats");
+  const result = await client.query(query);
+
+  const actionsQuery = `
+    query {
+      lpActionss(where: { lpAddress: "${params.address}" }, orderBy: "timestamp", orderDirection: "desc", limit: 20) {
+        items {
           id
+          actionType
           amount
           timestamp
         }
@@ -252,8 +424,23 @@ export async function executeGetLpStats(
     }
   `;
 
-  logger.debug({ query, params }, "Executing getLpStats");
-  return await client.query(query);
+  const actionsResult = await client.query(actionsQuery);
+
+  const lp = result.liquidityProviderss?.items?.[0];
+  if (lp) {
+    const actions = actionsResult.lpActionss?.items || [];
+    return {
+      liquidityProvider: {
+        ...lp,
+        address: lp.id,
+        deposits: actions.filter((action: any) => action.actionType === "DEPOSIT").slice(0, 10),
+        withdrawals: actions
+          .filter((action: any) => action.actionType === "WITHDRAWAL")
+          .slice(0, 10),
+      },
+    };
+  }
+  return { liquidityProvider: null };
 }
 
 export async function executeGetLeaderboard(
@@ -265,25 +452,29 @@ export async function executeGetLeaderboard(
   if (params.type === "users") {
     query = `
       query {
-        users(orderBy: totalWinnings, orderDirection: desc, first: ${params.first || 10}) {
-          id
-          address
-          totalTicketsPurchased
-          totalWinnings
-          totalReferralFees
+        userss(orderBy: "totalWinnings", orderDirection: "desc", limit: ${params.first || 10}) {
+          items {
+            id
+            totalTicketsPurchased
+            totalWinnings
+            totalReferralFees
+          }
+          totalCount
         }
       }
     `;
   } else if (params.type === "lps") {
     query = `
       query {
-        liquidityProviders(orderBy: totalFeesEarned, orderDirection: desc, first: ${params.first || 10}) {
-          id
-          address
-          stake
-          totalFeesEarned
-          totalDeposited
-          riskPercentage
+        liquidityProviderss(orderBy: "totalFeesEarned", orderDirection: "desc", limit: ${params.first || 10}) {
+          items {
+            id
+            stake
+            totalFeesEarned
+            totalDeposited
+            riskPercentage
+          }
+          totalCount
         }
       }
     `;
@@ -292,7 +483,23 @@ export async function executeGetLeaderboard(
   }
 
   logger.debug({ query, params }, "Executing getLeaderboard");
-  return await client.query(query);
+  const result = await client.query(query);
+
+  if (params.type === "users") {
+    const users =
+      result.userss?.items?.map((user: any) => ({
+        ...user,
+        address: user.id,
+      })) || [];
+    return { users };
+  } else {
+    const lps =
+      result.liquidityProviderss?.items?.map((lp: any) => ({
+        ...lp,
+        address: lp.id,
+      })) || [];
+    return { liquidityProviders: lps };
+  }
 }
 
 export async function executeGetHourlyStats(
@@ -303,10 +510,10 @@ export async function executeGetHourlyStats(
 
   const whereConditions: string[] = [];
   if (params.startTime !== undefined) {
-    whereConditions.push(`timestamp_gte: ${params.startTime}`);
+    whereConditions.push(`hourTimestamp_gte: ${params.startTime}`);
   }
   if (params.endTime !== undefined) {
-    whereConditions.push(`timestamp_lte: ${params.endTime}`);
+    whereConditions.push(`hourTimestamp_lte: ${params.endTime}`);
   }
 
   if (whereConditions.length > 0) {
@@ -314,27 +521,43 @@ export async function executeGetHourlyStats(
   }
 
   if (params.first !== undefined) {
-    args.push(`first: ${params.first}`);
+    args.push(`limit: ${params.first}`);
   }
 
-  args.push("orderBy: timestamp", "orderDirection: desc");
+  args.push('orderBy: "hourTimestamp"', 'orderDirection: "desc"');
 
   const query = `
     query {
-      hourlyStats(${args.join(", ")}) {
-        timestamp
-        totalVolume
-        uniqueUsers
-        totalRounds
-        activeUsers
-        totalTicketsSold
-        averageTicketPrice
+      hourlyStatss(${args.join(", ")}) {
+        items {
+          hourTimestamp
+          totalTicketsValue
+          uniquePlayers
+          roundsCompleted
+          totalTicketsSold
+          totalLpFeesGenerated
+          totalReferralFeesGenerated
+          totalProtocolFeesGenerated
+        }
+        totalCount
       }
     }
   `;
 
   logger.debug({ query, params }, "Executing getHourlyStats");
-  return await client.query(query);
+  const result = await client.query(query);
+
+  const stats =
+    result.hourlyStatss?.items?.map((stat: any) => ({
+      ...stat,
+      timestamp: stat.hourTimestamp,
+      totalVolume: stat.totalTicketsValue,
+      uniqueUsers: stat.uniquePlayers,
+      totalRounds: stat.roundsCompleted,
+      activeUsers: stat.uniquePlayers,
+    })) || [];
+
+  return { hourlyStats: stats };
 }
 
 export const toolExecutors = {
@@ -363,15 +586,48 @@ export async function executeTool(
   toolName: string,
   validatedParams: any
 ): Promise<any> {
+  logger.info("=== executeTool START ===");
+  logger.info({ toolName, validatedParams }, "Tool execution request");
+
   const executor = toolExecutors[toolName as keyof typeof toolExecutors];
 
   if (!executor) {
+    logger.error(
+      { toolName, availableTools: Object.keys(toolExecutors) },
+      "Unknown tool requested"
+    );
     throw new MCPError(1002, `Unknown tool: ${toolName}`, { toolName });
   }
 
-  if (toolName === "getCurrentRound" || toolName === "getProtocolStats") {
-    return await (executor as any)(client);
-  }
+  try {
+    logger.info({ toolName }, "Found executor for tool, calling it now");
 
-  return await (executor as any)(client, validatedParams);
+    let result;
+    if (toolName === "getCurrentRound" || toolName === "getProtocolStats") {
+      result = await (executor as any)(client);
+    } else {
+      result = await (executor as any)(client, validatedParams);
+    }
+
+    logger.info(
+      { toolName, resultKeys: result ? Object.keys(result) : [] },
+      "Tool execution completed"
+    );
+    logger.info("=== executeTool SUCCESS ===");
+
+    return result;
+  } catch (error) {
+    logger.error(
+      {
+        toolName,
+        error,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        errorStack: error instanceof Error ? error.stack : undefined,
+        errorType: error?.constructor?.name,
+      },
+      "Tool execution failed"
+    );
+    logger.info("=== executeTool ERROR ===");
+    throw error;
+  }
 }
