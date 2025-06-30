@@ -1,4 +1,4 @@
-async function setupNodeFetchPolyfills() {
+async function setupNodeFetchPolyfills(): Promise<void> {
   if (typeof globalThis.fetch === "undefined" || typeof globalThis.Headers === "undefined") {
     if (typeof globalThis.Headers === "undefined") {
       globalThis.Headers = createCustomHeaders();
@@ -7,30 +7,37 @@ async function setupNodeFetchPolyfills() {
     if (typeof globalThis.fetch === "undefined") {
       try {
         const nodeFetch = await import("node-fetch");
-        globalThis.fetch = nodeFetch.default as any;
+        globalThis.fetch = nodeFetch.default as unknown as typeof fetch;
       } catch (importError) {
         console.warn("Could not import node-fetch:", (importError as Error).message);
 
-        globalThis.fetch = async function (url: string) {
-          throw new Error(
-            `fetch not available: Cannot make request to ${url}. node-fetch could not be loaded.`
-          );
-        } as any;
+        globalThis.fetch = (function (_input: RequestInfo | URL, _init?: RequestInit): Promise<Response> {
+          const inputStr = typeof _input === 'string' ? _input : _input instanceof URL ? _input.toString() : 'unknown';
+          return Promise.reject(new Error(
+            `fetch not available: Cannot make request to ${inputStr}. node-fetch could not be loaded.`
+          ));
+        }) as typeof fetch;
       }
     }
   }
 }
 
-function createCustomHeaders() {
-  return class Headers {
+type HeadersInit = [string, string][] | Record<string, string> | Headers;
+
+function createCustomHeaders(): typeof Headers {
+  return class CustomHeaders implements Headers {
     private headers: Map<string, string> = new Map();
 
-    constructor(init?: any) {
-      if (init) {
+    constructor(init?: HeadersInit) {
+      if (init !== undefined && init !== null) {
         if (Array.isArray(init)) {
           for (const [key, value] of init) {
             this.headers.set(key.toLowerCase(), String(value));
           }
+        } else if (init instanceof Headers) {
+          init.forEach((value, key) => {
+            this.headers.set(key.toLowerCase(), value);
+          });
         } else if (typeof init === "object") {
           for (const [key, value] of Object.entries(init)) {
             this.headers.set(key.toLowerCase(), String(value));
@@ -39,61 +46,69 @@ function createCustomHeaders() {
       }
     }
 
-    append(name: string, value: string) {
+    append(name: string, value: string): void {
       const existing = this.headers.get(name.toLowerCase());
-      if (existing) {
+      if (existing !== undefined) {
         this.headers.set(name.toLowerCase(), `${existing}, ${value}`);
       } else {
         this.headers.set(name.toLowerCase(), value);
       }
     }
 
-    delete(name: string) {
+    delete(name: string): void {
       this.headers.delete(name.toLowerCase());
     }
 
     get(name: string): string | null {
-      return this.headers.get(name.toLowerCase()) || null;
+      return this.headers.get(name.toLowerCase()) ?? null;
     }
 
     has(name: string): boolean {
       return this.headers.has(name.toLowerCase());
     }
 
-    set(name: string, value: string) {
+    set(name: string, value: string): void {
       this.headers.set(name.toLowerCase(), value);
     }
 
-    *[Symbol.iterator]() {
+    getSetCookie(): string[] {
+      const setCookie = this.headers.get('set-cookie');
+      if (setCookie === undefined) {
+        return [];
+      }
+      return setCookie.split(', ');
+    }
+
+    *[Symbol.iterator](): IterableIterator<[string, string]> {
       for (const [key, value] of this.headers) {
         yield [key, value];
       }
     }
 
-    forEach(callback: (value: string, key: string, parent: Headers) => void) {
+    forEach(callback: (value: string, key: string, parent: Headers) => void, thisArg?: unknown): void {
       for (const [key, value] of this.headers) {
-        callback(value, key, this);
+        callback.call(thisArg, value, key, this);
       }
     }
 
-    keys() {
+    keys(): IterableIterator<string> {
       return this.headers.keys();
     }
 
-    values() {
+    values(): IterableIterator<string> {
       return this.headers.values();
     }
 
-    entries() {
+    entries(): IterableIterator<[string, string]> {
       return this.headers.entries();
     }
-  } as any;
+  } as unknown as typeof Headers;
 }
 
 import { GraphQLClient, gql, type Variables } from "graphql-request";
 import { createClient, type Client as WSClient } from "graphql-ws";
 import * as WebSocket from "ws";
-import { type DocumentNode, print, parse } from "graphql";
+import { type DocumentNode, print, parse, Kind, OperationTypeNode } from "graphql";
 import { getConfig } from "../config/index.js";
 import { getLogger, createTimer } from "../logging/index.js";
 import { getSessionManager } from "../sessions/manager.js";
@@ -124,7 +139,7 @@ export interface GraphQLClientConfig {
   headers?: Record<string, string>;
 }
 
-export type SubscriptionHandler<T = any> = (data: T, error?: Error) => void;
+export type SubscriptionHandler<T = unknown> = (data: T, error?: Error) => void;
 
 export interface SubscriptionOptions {
   debounceMs?: number;
@@ -153,20 +168,27 @@ interface PooledConnection {
   errorCount: number;
 }
 
+interface SubscriptionData {
+  handler: SubscriptionHandler;
+  debounceTimer?: NodeJS.Timeout;
+  lastData?: unknown;
+  onError?: (error: Error) => void;
+  onComplete?: () => void;
+}
+
 interface WSConnectionState {
   client: WSClient | null;
   connected: boolean;
   connecting: boolean;
-  subscriptions: Map<
-    string,
-    {
-      handler: SubscriptionHandler;
-      debounceTimer?: NodeJS.Timeout;
-      lastData?: any;
-      onError?: (error: Error) => void;
-      onComplete?: () => void;
-    }
-  >;
+  subscriptions: Map<string, SubscriptionData>;
+}
+
+interface GraphQLErrorResponse extends Error {
+  response?: {
+    body?: unknown;
+    status?: number;
+    headers?: unknown;
+  };
 }
 
 export class MegapotGraphQLClient {
@@ -191,7 +213,7 @@ export class MegapotGraphQLClient {
 
     this.config = {
       endpoint: appConfig.graphql.endpoint,
-      wsEndpoint: config?.wsEndpoint || appConfig.graphql.endpoint.replace("http", "ws"),
+      wsEndpoint: config?.wsEndpoint ?? appConfig.graphql.endpoint.replace("http", "ws"),
       maxComplexity: appConfig.graphql.maxQueryComplexity,
       timeout: appConfig.graphql.timeout,
       retryAttempts: 3,
@@ -207,9 +229,9 @@ export class MegapotGraphQLClient {
 
   private initializeConnectionPool(): void {
     for (let i = 0; i < this.config.connectionPoolSize; i++) {
-      const client = new GraphQLClient(this.config.endpoint, {
-        headers: this.config.headers,
-      });
+      const client = new GraphQLClient(this.config.endpoint, 
+        this.config.headers ? { headers: this.config.headers } : {}
+      );
 
       this.connectionPool.push({
         client,
@@ -246,7 +268,7 @@ export class MegapotGraphQLClient {
 
     this.disconnectionBuffer = new DisconnectionBuffer(bufferConfig);
 
-    this.disconnectionBuffer.on("extendedOutage", (outageMs, subscriptionCount) => {
+    this.disconnectionBuffer.on("extendedOutage", (outageMs: number, subscriptionCount: number) => {
       const error = new WebSocketDisconnectionError(
         outageMs,
         subscriptionCount,
@@ -254,10 +276,10 @@ export class MegapotGraphQLClient {
       );
 
       Array.from(this.wsState.subscriptions.entries()).forEach(([, subscription]) => {
-        if (subscription.onError) {
+        if (subscription.onError !== undefined) {
           subscription.onError(error);
         } else {
-          subscription.handler(undefined as any, error);
+          subscription.handler(undefined, error);
         }
       });
 
@@ -265,7 +287,7 @@ export class MegapotGraphQLClient {
       const activeSessions = sessionManager.getActiveSessions();
 
       for (const session of activeSessions) {
-        if (session.websocket) {
+        if (session.websocket !== undefined && session.websocket !== null) {
           sessionManager.emit("error", session.id, error);
         }
       }
@@ -280,19 +302,19 @@ export class MegapotGraphQLClient {
       );
     });
 
-    this.disconnectionBuffer.on("bufferingStarted", (subscriptionCount) => {
+    this.disconnectionBuffer.on("bufferingStarted", (subscriptionCount: number) => {
       logger.info({ subscriptionCount }, "Disconnection buffering started");
     });
 
-    this.disconnectionBuffer.on("updatesReplayed", (updateCount, subscriptionCount) => {
+    this.disconnectionBuffer.on("updatesReplayed", (updateCount: number, subscriptionCount: number) => {
       logger.info({ updateCount, subscriptionCount }, "Buffered updates replayed");
     });
 
-    this.disconnectionBuffer.on("bufferCleared", (reason, updateCount) => {
+    this.disconnectionBuffer.on("bufferCleared", (reason: string, updateCount: number) => {
       logger.warn({ reason, updateCount }, "Disconnection buffer cleared");
     });
 
-    this.disconnectionBuffer.on("bufferOverflow", (droppedUpdates) => {
+    this.disconnectionBuffer.on("bufferOverflow", (droppedUpdates: number) => {
       logger.warn({ droppedUpdates }, "Disconnection buffer overflow");
     });
   }
@@ -300,17 +322,17 @@ export class MegapotGraphQLClient {
   private async getConnection(): Promise<PooledConnection> {
     let connection = this.connectionPool.find((conn) => !conn.inUse);
 
-    if (!connection) {
+    if (connection === undefined) {
       await new Promise((resolve) => setTimeout(resolve, 100));
       connection = this.connectionPool.find((conn) => !conn.inUse);
 
-      if (!connection) {
+      if (connection === undefined) {
         connection = this.connectionPool.sort((a, b) => a.lastUsed - b.lastUsed)[0];
         logger.warn("All connections in use, reusing least recently used");
       }
     }
 
-    if (connection) {
+    if (connection !== undefined) {
       connection.inUse = true;
       connection.lastUsed = Date.now();
       connection.requestCount++;
@@ -325,9 +347,9 @@ export class MegapotGraphQLClient {
     if (connection.errorCount > 10) {
       const index = this.connectionPool.indexOf(connection);
       if (index !== -1) {
-        const newClient = new GraphQLClient(this.config.endpoint, {
-          headers: this.config.headers,
-        });
+        const newClient = new GraphQLClient(this.config.endpoint, 
+          this.config.headers ? { headers: this.config.headers } : {}
+        );
 
         this.connectionPool[index] = {
           client: newClient,
@@ -342,7 +364,7 @@ export class MegapotGraphQLClient {
     }
   }
 
-  async query<T = any>(query: string | DocumentNode, options: QueryOptions = {}): Promise<T> {
+  async query<T = unknown>(query: string | DocumentNode, options: QueryOptions = {}): Promise<T> {
     await this.ensurePolyfillsInitialized();
 
     logger.info("=== GraphQL Client query() START ===");
@@ -363,16 +385,18 @@ export class MegapotGraphQLClient {
     logger.info({ queryString }, "Full query string to be sent");
 
     const sessionManager = getSessionManager();
-    const session = options.sessionId ? sessionManager.getSession(options.sessionId) : undefined;
-    const requestId = session
+    const session = options.sessionId !== undefined && options.sessionId !== null 
+      ? sessionManager.getSession(options.sessionId) 
+      : undefined;
+    const requestId = session !== undefined
       ? (session.data.get("currentRequestId") as string)
       : `req-${Date.now()}`;
 
-    if (!options.skipComplexityCheck) {
+    if (options.skipComplexityCheck !== true) {
       const validation = validateQueryComplexity(queryDoc, this.config.maxComplexity);
 
       if (!validation.valid) {
-        const error = new Error(validation.message || "Query too complex");
+        const error = new Error(validation.message ?? "Query too complex");
         logger.error(
           {
             requestId,
@@ -415,8 +439,8 @@ export class MegapotGraphQLClient {
         );
 
         connection.client.setHeader("x-request-id", requestId);
-        connection.client.setHeader("x-session-id", options.sessionId || "");
-        if (options.headers) {
+        connection.client.setHeader("x-session-id", options.sessionId ?? "");
+        if (options.headers !== undefined && options.headers !== null) {
           Object.entries(options.headers).forEach(([key, value]) => {
             connection!.client.setHeader(key, value);
           });
@@ -436,8 +460,8 @@ export class MegapotGraphQLClient {
         logger.info(
           {
             requestId,
-            resultKeys: result ? Object.keys(result) : [],
-            hasData: !!result,
+            resultKeys: result !== null && result !== undefined ? Object.keys(result) : [],
+            hasData: result !== null && result !== undefined,
           },
           "GraphQL request completed successfully"
         );
@@ -452,10 +476,11 @@ export class MegapotGraphQLClient {
         return result;
       } catch (error) {
         lastError = error as Error;
-        if (connection) {
+        if (connection !== null) {
           connection.errorCount++;
         }
 
+        const gqlError = error as GraphQLErrorResponse;
         logger.error(
           {
             requestId,
@@ -466,9 +491,9 @@ export class MegapotGraphQLClient {
             errorType: lastError.constructor.name,
             willRetry: attempt < this.config.retryAttempts - 1,
             endpoint: this.config.endpoint,
-            responseBody: (error as any).response?.body,
-            responseStatus: (error as any).response?.status,
-            responseHeaders: (error as any).response?.headers,
+            responseBody: gqlError.response?.body,
+            responseStatus: gqlError.response?.status,
+            responseHeaders: gqlError.response?.headers,
           },
           "GraphQL query failed - detailed error info"
         );
@@ -488,7 +513,7 @@ export class MegapotGraphQLClient {
           await new Promise((resolve) => setTimeout(resolve, delay));
         }
       } finally {
-        if (connection) {
+        if (connection !== null) {
           this.releaseConnection(connection);
           connection = null;
         }
@@ -507,7 +532,7 @@ export class MegapotGraphQLClient {
     );
 
     logger.info("=== GraphQL Client query() ERROR ===");
-    throw lastError || new Error("Query failed");
+    throw lastError ?? new Error("Query failed");
   }
 
   private async setupWebSocket(): Promise<void> {
@@ -518,10 +543,15 @@ export class MegapotGraphQLClient {
     this.wsState.connecting = true;
 
     try {
+      const wsEndpoint = this.config.wsEndpoint;
+      if (wsEndpoint === undefined) {
+        throw new Error("WebSocket endpoint not configured");
+      }
+
       this.wsState.client = createClient({
-        url: this.config.wsEndpoint!,
+        url: wsEndpoint,
         webSocketImpl: WebSocket,
-        connectionParams: () => (this.config.headers as Record<string, unknown>) || {},
+        connectionParams: () => (this.config.headers as Record<string, unknown>) ?? {},
         retryAttempts: this.config.retryAttempts,
         shouldRetry: () => true,
         on: {
@@ -611,13 +641,13 @@ export class MegapotGraphQLClient {
     );
 
     this.reconnectTimeout = setTimeout(() => {
-      this.setupWebSocket().catch((error) => {
+      void this.setupWebSocket().catch((error: unknown) => {
         logger.error({ error }, "Reconnection failed");
       });
     }, delay);
   }
 
-  async subscribe<T = any>(
+  async subscribe<T = unknown>(
     subscription: string | DocumentNode,
     handler: SubscriptionHandler<T>,
     options: SubscriptionOptions = {}
@@ -641,34 +671,32 @@ export class MegapotGraphQLClient {
     const wrappedHandler: SubscriptionHandler<T> =
       debounceMs > 0 ? this.createDebouncedHandler(subscriptionId, handler, debounceMs) : handler;
 
-    const subscriptionData: {
-      handler: SubscriptionHandler;
-      debounceTimer?: NodeJS.Timeout;
-      lastData?: any;
-      onError?: (error: Error) => void;
-      onComplete?: () => void;
-    } = {
-      handler: wrappedHandler,
+    const subscriptionData: SubscriptionData = {
+      handler: wrappedHandler as SubscriptionHandler,
       lastData: undefined,
     };
 
-    if (options.onError) {
+    if (options.onError !== undefined) {
       subscriptionData.onError = options.onError;
     }
-    if (options.onComplete) {
+    if (options.onComplete !== undefined) {
       subscriptionData.onComplete = options.onComplete;
     }
 
     this.wsState.subscriptions.set(subscriptionId, subscriptionData);
 
-    const unsubscribe = this.wsState.client!.subscribe<T>(
+    if (this.wsState.client === null) {
+      throw new Error("WebSocket client not initialized");
+    }
+
+    const unsubscribe = this.wsState.client.subscribe<T>(
       {
         query: subscriptionString,
-        variables: (options.variables as Record<string, unknown>) || {},
+        variables: (options.variables as Record<string, unknown>) ?? {},
       },
       {
         next: (data) => {
-          if (data.data) {
+          if (data.data !== undefined && data.data !== null) {
             if (this.disconnectionBuffer.isBufferingActive()) {
               this.disconnectionBuffer.bufferUpdate(subscriptionId, data.data);
             } else {
@@ -685,17 +713,17 @@ export class MegapotGraphQLClient {
             "Subscription error"
           );
 
-          if (options.onError) {
+          if (options.onError !== undefined) {
             options.onError(error as Error);
           } else {
-            handler(undefined as any, error as Error);
+            handler(undefined as T, error as Error);
           }
         },
         complete: () => {
           logger.debug({ subscriptionId }, "Subscription completed");
           this.wsState.subscriptions.delete(subscriptionId);
 
-          if (options.onComplete) {
+          if (options.onComplete !== undefined) {
             options.onComplete();
           }
         },
@@ -713,7 +741,7 @@ export class MegapotGraphQLClient {
 
     return {
       id: subscriptionId,
-      unsubscribe: () => {
+      unsubscribe: (): void => {
         unsubscribe();
         this.cleanupSubscription(subscriptionId);
       },
@@ -725,18 +753,18 @@ export class MegapotGraphQLClient {
     handler: SubscriptionHandler<T>,
     debounceMs: number
   ): SubscriptionHandler<T> {
-    return (data: T, error?: Error) => {
+    return (data: T, error?: Error): void => {
       const subscription = this.wsState.subscriptions.get(subscriptionId);
-      if (!subscription) return;
+      if (subscription === undefined) return;
 
-      if (subscription.debounceTimer) {
+      if (subscription.debounceTimer !== undefined) {
         clearTimeout(subscription.debounceTimer);
       }
 
       subscription.lastData = data;
 
       subscription.debounceTimer = setTimeout(() => {
-        handler(subscription.lastData, error);
+        handler(subscription.lastData as T, error);
         delete subscription.debounceTimer;
       }, debounceMs);
     };
@@ -744,8 +772,8 @@ export class MegapotGraphQLClient {
 
   private cleanupSubscription(subscriptionId: string): void {
     const subscription = this.wsState.subscriptions.get(subscriptionId);
-    if (subscription) {
-      if (subscription.debounceTimer) {
+    if (subscription !== undefined) {
+      if (subscription.debounceTimer !== undefined) {
         clearTimeout(subscription.debounceTimer);
       }
       this.wsState.subscriptions.delete(subscriptionId);
@@ -754,7 +782,7 @@ export class MegapotGraphQLClient {
 
   private replayBufferedUpdates(subscriptionId: string, updates: BufferedUpdate[]): void {
     const subscription = this.wsState.subscriptions.get(subscriptionId);
-    if (!subscription) {
+    if (subscription === undefined) {
       logger.warn(
         { subscriptionId, updateCount: updates.length },
         "Cannot replay updates: subscription not found"
@@ -822,45 +850,47 @@ export class MegapotGraphQLClient {
   }
 
   private startHealthCheck(): void {
-    this.healthCheckInterval = setInterval(async () => {
-      try {
-        const testQuery = gql`
-          query HealthCheck {
-            __typename
+    this.healthCheckInterval = setInterval(() => {
+      void (async (): Promise<void> => {
+        try {
+          const testQuery = gql`
+            query HealthCheck {
+              __typename
+            }
+          `;
+
+          await this.query(testQuery, { skipComplexityCheck: true });
+
+          if (this.wsState.connected && this.wsState.client !== null) {
+            logger.debug("Health check passed");
           }
-        `;
-
-        await this.query(testQuery, { skipComplexityCheck: true });
-
-        if (this.wsState.connected && this.wsState.client) {
-          logger.debug("Health check passed");
+        } catch (error) {
+          logger.error({ error }, "Health check failed");
         }
-      } catch (error) {
-        logger.error({ error }, "Health check failed");
-      }
+      })();
     }, 30000);
   }
 
   async shutdown(): Promise<void> {
     logger.info("Shutting down GraphQL client");
 
-    if (this.healthCheckInterval) {
+    if (this.healthCheckInterval !== null) {
       clearInterval(this.healthCheckInterval);
     }
-    if (this.reconnectTimeout) {
+    if (this.reconnectTimeout !== null) {
       clearTimeout(this.reconnectTimeout);
     }
 
-    if (this.wsState.client) {
+    if (this.wsState.client !== null) {
       await this.wsState.client.dispose();
     }
 
-    if (this.disconnectionBuffer) {
+    if (this.disconnectionBuffer !== undefined) {
       this.disconnectionBuffer.dispose();
     }
 
     Array.from(this.wsState.subscriptions.values()).forEach((sub) => {
-      if (sub.debounceTimer) {
+      if (sub.debounceTimer !== undefined) {
         clearTimeout(sub.debounceTimer);
       }
     });
@@ -873,13 +903,14 @@ export class MegapotGraphQLClient {
 function getDebounceMs(subscription: DocumentNode): number {
   const definition = subscription.definitions[0];
   if (
-    definition &&
-    definition.kind === "OperationDefinition" &&
-    definition.operation === "subscription" &&
-    definition.name
+    definition !== undefined &&
+    definition.kind === Kind.OPERATION_DEFINITION &&
+    definition.operation === OperationTypeNode.SUBSCRIPTION &&
+    definition.name !== undefined &&
+    definition.name !== null
   ) {
     const name = definition.name.value;
-    return SUBSCRIPTION_DEBOUNCE_MS[name as keyof typeof SUBSCRIPTION_DEBOUNCE_MS] || 100;
+    return SUBSCRIPTION_DEBOUNCE_MS[name as keyof typeof SUBSCRIPTION_DEBOUNCE_MS] ?? 100;
   }
   return 100;
 }
@@ -887,14 +918,14 @@ function getDebounceMs(subscription: DocumentNode): number {
 let clientInstance: MegapotGraphQLClient | null = null;
 
 export function getGraphQLClient(config?: Partial<GraphQLClientConfig>): MegapotGraphQLClient {
-  if (!clientInstance) {
+  if (clientInstance === null) {
     clientInstance = new MegapotGraphQLClient(config);
   }
   return clientInstance;
 }
 
 export async function resetGraphQLClient(): Promise<void> {
-  if (clientInstance) {
+  if (clientInstance !== null) {
     await clientInstance.shutdown();
     clientInstance = null;
   }

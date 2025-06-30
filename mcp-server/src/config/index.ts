@@ -68,12 +68,12 @@ export interface Config {
 
 export function loadConfig(): Config {
   const env = process.env;
-  const environment = validateEnvironment(env["NODE_ENV"] || "development");
+  const environment = validateEnvironment(env["NODE_ENV"] ?? "development");
 
   const config: Config = {
     environment,
-    serviceName: env["SERVICE_NAME"] || "megapot-mcp-server",
-    version: env["SERVICE_VERSION"] || process.env["npm_package_version"] || "0.0.1",
+    serviceName: env["SERVICE_NAME"] ?? "megapot-mcp-server",
+    version: env["SERVICE_VERSION"] ?? process.env["npm_package_version"] ?? "0.0.1",
 
     rateLimit: {
       requestsPerSecond: validateNumber(env["RATE_LIMIT_RPS"], 10, "RATE_LIMIT_RPS"),
@@ -83,21 +83,21 @@ export function loadConfig(): Config {
 
     logging: {
       level: validateLogLevel(
-        env["LOG_LEVEL"] || (environment === "production" ? "info" : "debug")
+        env["LOG_LEVEL"] ?? (environment === "production" ? "info" : "debug")
       ),
       pretty: environment !== "production" && env["LOG_PRETTY"] !== "false",
       redactPaths: parseStringArray(
-        env["LOG_REDACT_PATHS"] || "password,token,secret,authorization"
+        env["LOG_REDACT_PATHS"] ?? "password,token,secret,authorization"
       ),
     },
 
     transport: {
-      type: validateTransportType(env["MEGAPOT_MCP_TRANSPORT"] || "stdio"),
+      type: validateTransportType(env["MEGAPOT_MCP_TRANSPORT"] ?? "stdio"),
       ...(env["MEGAPOT_MCP_TRANSPORT"] === "http" && {
         http: {
-          host: env["MEGAPOT_MCP_HOST"] || "0.0.0.0",
+          host: env["MEGAPOT_MCP_HOST"] ?? "0.0.0.0",
           port: validateNumber(env["MEGAPOT_MCP_PORT"], 3001, "MEGAPOT_MCP_PORT"),
-          corsOrigins: parseStringArray(env["CORS_ORIGINS"] || "*"),
+          corsOrigins: parseStringArray(env["CORS_ORIGINS"] ?? "*"),
         },
       }),
     },
@@ -113,8 +113,8 @@ export function loadConfig(): Config {
     },
 
     graphql: {
-      endpoint: env["GRAPHQL_ENDPOINT"] || "http://localhost:42069/graphql",
-      wsEndpoint: env["GRAPHQL_WS_ENDPOINT"] || "ws://localhost:42069/graphql",
+      endpoint: env["GRAPHQL_ENDPOINT"] ?? "http://localhost:42069/graphql",
+      wsEndpoint: env["GRAPHQL_WS_ENDPOINT"] ?? "ws://localhost:42069/graphql",
       maxQueryDepth: validateNumber(env["MAX_QUERY_DEPTH"], 10, "MAX_QUERY_DEPTH"),
       maxQueryComplexity: validateNumber(env["MAX_QUERY_COMPLEXITY"], 10000, "MAX_QUERY_COMPLEXITY"),
       timeout: validateNumber(env["GRAPHQL_TIMEOUT_MS"], 30000, "GRAPHQL_TIMEOUT_MS"),
@@ -122,7 +122,7 @@ export function loadConfig(): Config {
     },
 
     enableAuth: env["ENABLE_AUTH"] === "true",
-    authTokenHeader: env["AUTH_TOKEN_HEADER"] || "x-auth-token",
+    authTokenHeader: env["AUTH_TOKEN_HEADER"] ?? "x-auth-token",
 
     enableMetrics: env["ENABLE_METRICS"] === "true",
     metricsPort:
@@ -174,7 +174,7 @@ function validateLogLevel(value: string): pino.Level {
 }
 
 function validateNumber(value: string | undefined, defaultValue: number, field: string): number {
-  if (!value) return defaultValue;
+  if (value === undefined || value === '') return defaultValue;
 
   const parsed = parseInt(value, 10);
   if (isNaN(parsed)) {
@@ -214,7 +214,7 @@ function validateConfig(config: Config): void {
     );
   }
 
-  if (config.enableMetrics && !config.metricsPort) {
+  if (config.enableMetrics && (config.metricsPort === undefined || config.metricsPort === 0)) {
     throw new ConfigurationError("Metrics port required when metrics are enabled", "METRICS_PORT");
   }
 }

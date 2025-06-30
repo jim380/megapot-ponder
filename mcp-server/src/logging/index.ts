@@ -10,7 +10,7 @@ export interface LogContext {
   path?: string;
   statusCode?: number;
   duration?: number;
-  error?: Error | unknown;
+  error?: Error;
   [key: string]: unknown;
 }
 
@@ -26,7 +26,7 @@ export function createTimer(): PerformanceTimer {
   return {
     start,
     end: () => Date.now() - start,
-    log: (logger: pino.Logger, message: string, context?: LogContext) => {
+    log: (logger: pino.Logger, message: string, context?: LogContext): void => {
       const duration = Date.now() - start;
       logger.info({ duration, ...context }, message);
     },
@@ -40,24 +40,39 @@ function createBaseConfig(config: Config): pino.LoggerOptions {
 
     base: {
       pid: process.pid,
-      hostname: process.env["HOSTNAME"] || "unknown",
+      hostname: process.env["HOSTNAME"] ?? "unknown",
       environment: config.environment,
       version: config.version,
     },
 
     serializers: {
       error: pino.stdSerializers.err,
-      request: (req: any) => ({
-        id: req.id,
-        method: req.method,
-        url: req.url,
-        headers: redactHeaders(req.headers),
-        remoteAddress: req.remoteAddress,
-      }),
-      response: (res: any) => ({
-        statusCode: res.statusCode,
-        headers: redactHeaders(res.headers),
-      }),
+      request: (req: unknown) => {
+        const request = req as {
+          id?: string;
+          method?: string;
+          url?: string;
+          headers?: Record<string, string>;
+          remoteAddress?: string;
+        };
+        return {
+          id: request.id,
+          method: request.method,
+          url: request.url,
+          headers: redactHeaders(request.headers),
+          remoteAddress: request.remoteAddress,
+        };
+      },
+      response: (res: unknown) => {
+        const response = res as {
+          statusCode?: number;
+          headers?: Record<string, string>;
+        };
+        return {
+          statusCode: response.statusCode,
+          headers: redactHeaders(response.headers),
+        };
+      },
     },
 
     redact: {
@@ -67,8 +82,8 @@ function createBaseConfig(config: Config): pino.LoggerOptions {
 
     formatters: {
       level: (label: string) => ({ level: label }),
-      log: (object: Record<string, any>) => {
-        if (!object["time"] && !object["timestamp"]) {
+      log: (object: Record<string, unknown>) => {
+        if (object["time"] === undefined && object["timestamp"] === undefined) {
           object["timestamp"] = new Date().toISOString();
         }
         return object;
@@ -168,7 +183,7 @@ export function createRequestLogger(requestId: string, sessionId?: string): pino
 
 export function logError(
   logger: pino.Logger,
-  error: Error | unknown,
+  error: unknown,
   message: string,
   context?: LogContext
 ): void {
@@ -180,7 +195,7 @@ export function logError(
         message: errorObj.message,
         name: errorObj.name,
         stack: errorObj.stack,
-        ...((errorObj as any).code && { code: (errorObj as any).code }),
+        ...("code" in errorObj && typeof errorObj.code !== "undefined" && { code: errorObj.code }),
       },
       ...context,
     },
@@ -199,7 +214,7 @@ export class LoggingContext {
   private static asyncLocalStorage = new Map<string, LogContext>();
 
   static async run<T>(context: LogContext, fn: () => Promise<T>): Promise<T> {
-    const id = context.requestId || String(Date.now());
+    const id = context.requestId ?? String(Date.now());
     this.asyncLocalStorage.set(id, context);
 
     try {
@@ -213,7 +228,7 @@ export class LoggingContext {
     const entries = Array.from(this.asyncLocalStorage.entries());
     if (entries.length > 0) {
       const lastEntry = entries[entries.length - 1];
-      return lastEntry ? lastEntry[1] : undefined;
+      return lastEntry?.[1];
     }
     return undefined;
   }
@@ -247,7 +262,7 @@ export class PerformanceLogger {
         timerName: name,
         ...context,
       },
-      message || `Operation ${name} completed`
+      message ?? `Operation ${name} completed`
     );
 
     return duration;
@@ -260,7 +275,7 @@ export class PerformanceLogger {
     context?: LogContext
   ): void {
     const timer = this.timers.get(name);
-    if (!timer) return;
+    if (timer === undefined) return;
 
     const duration = Date.now() - timer.start;
     if (duration > threshold) {

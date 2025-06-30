@@ -1,7 +1,7 @@
 import { MegapotGraphQLClient } from "./client.js";
 import { WebSocketDisconnectionError } from "../errors/index.js";
 
-async function demonstrateDisconnectionBuffering() {
+async function demonstrateDisconnectionBuffering(): Promise<void> {
   console.log("🚀 Starting WebSocket Disconnection Buffer Demo");
 
   const client = new MegapotGraphQLClient({
@@ -19,11 +19,11 @@ async function demonstrateDisconnectionBuffering() {
         totalTicketsValue
       }
     }`,
-    (data) => {
+    (data: unknown) => {
       console.log("📊 Received update:", data);
     },
     {
-      onError: (error) => {
+      onError: (error: unknown) => {
         if (error instanceof WebSocketDisconnectionError) {
           console.log(`❌ Extended outage detected:`);
           const details = error.details as {
@@ -34,8 +34,10 @@ async function demonstrateDisconnectionBuffering() {
           console.log(`   Duration: ${details.outageMs}ms`);
           console.log(`   Affected subscriptions: ${details.subscriptionCount}`);
           console.log(`   Buffered updates: ${details.bufferSize}`);
-        } else {
+        } else if (error instanceof Error) {
           console.log("❌ Subscription error:", error.message);
+        } else {
+          console.log("❌ Unknown subscription error:", error);
         }
       },
       onComplete: () => {
@@ -55,11 +57,12 @@ async function demonstrateDisconnectionBuffering() {
     });
   }, 5000);
 
-  setTimeout(async () => {
+  setTimeout(() => {
     console.log("🧹 Cleaning up...");
-    subscription.unsubscribe();
-    await client.shutdown();
-    console.log("✅ Demo completed");
+    void subscription.unsubscribe();
+    void client.shutdown().then(() => {
+      console.log("✅ Demo completed");
+    });
   }, 60000);
 }
 
@@ -75,7 +78,7 @@ export const BUFFER_CONFIG_EXAMPLE = {
   maxTotalUpdates: 1000,
 };
 
-export function setupBufferMonitoring() {
+export function setupBufferMonitoring(): void {
   console.log("🎯 Buffer monitoring setup complete");
   console.log("   - 30s disconnection tolerance");
   console.log("   - 35s cleanup timeout");

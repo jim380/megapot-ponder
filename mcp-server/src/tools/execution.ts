@@ -9,11 +9,27 @@ import type {
   GetLeaderboardParams,
   GetHourlyStatsParams,
   SubscriptionParams,
+  User,
+  JackpotRound,
+  Ticket,
+  LiquidityProvider,
+  LpAction,
+  Referral,
+  HourlyStat,
 } from "../types/index.js";
+import { LpActionType } from "../types/index.js";
 import { serverLogger as logger } from "../logging/index.js";
 import { MCPError } from "../errors/index.js";
 
-function buildQueryArgs(params: any): string {
+interface QueryParams {
+  first?: number;
+  skip?: number;
+  orderBy?: string;
+  orderDirection?: string;
+  where?: Record<string, string | number | boolean | undefined>;
+}
+
+function buildQueryArgs(params: QueryParams): string {
   logger.debug("=== buildQueryArgs START ===");
   logger.debug({ params }, "Input parameters to buildQueryArgs");
 
@@ -38,7 +54,7 @@ function buildQueryArgs(params: any): string {
     args.push(`orderDirection: "${params.orderDirection}"`);
   }
 
-  if (params.where && Object.keys(params.where).length > 0) {
+  if (params.where !== undefined && Object.keys(params.where).length > 0) {
     logger.debug({ where: params.where }, "Processing where clause");
     const whereArgs = Object.entries(params.where)
       .filter(([_, value]) => value !== undefined)
@@ -46,7 +62,7 @@ function buildQueryArgs(params: any): string {
         if (typeof value === "string") {
           return `${key}: "${value}"`;
         }
-        return `${key}: ${value}`;
+        return `${key}: ${String(value)}`;
       });
 
     if (whereArgs.length > 0) {
@@ -60,10 +76,20 @@ function buildQueryArgs(params: any): string {
   return result;
 }
 
+interface GraphQLListResponse<T> {
+  items: T[];
+  totalCount: number;
+}
+
+interface UsersResponse {
+  users: User[];
+  totalCount: number;
+}
+
 export async function executeQueryUsers(
   client: MegapotGraphQLClient,
   params: QueryUsersParams
-): Promise<any> {
+): Promise<UsersResponse> {
   logger.info("=== START executeQueryUsers ===");
   logger.info({ params }, "Input parameters");
 
@@ -91,12 +117,12 @@ export async function executeQueryUsers(
 
   try {
     logger.debug("About to call client.query()");
-    const result = await client.query(query);
+    const result = await client.query<{ userss: GraphQLListResponse<User> }>(query);
     logger.info({ result }, "Raw GraphQL response");
 
-    const transformed = {
-      users: result.userss?.items || [],
-      totalCount: result.userss?.totalCount || 0,
+    const transformed: UsersResponse = {
+      users: result.userss?.items ?? [],
+      totalCount: result.userss?.totalCount ?? 0,
     };
 
     logger.info({ transformed }, "Transformed response");
@@ -118,10 +144,15 @@ export async function executeQueryUsers(
   }
 }
 
+interface RoundsResponse {
+  jackpotRounds: (JackpotRound & { roundNumber: string; ticketsSold: bigint })[];
+  totalCount: number;
+}
+
 export async function executeQueryRounds(
   client: MegapotGraphQLClient,
   params: QueryRoundsParams
-): Promise<any> {
+): Promise<RoundsResponse> {
   const args = buildQueryArgs(params);
   const query = `
     query {
@@ -144,25 +175,29 @@ export async function executeQueryRounds(
   `;
 
   logger.debug({ query, params }, "Executing queryRounds");
-  const result = await client.query(query);
+  const result = await client.query<{ jackpotRoundss: GraphQLListResponse<JackpotRound> }>(query);
 
-  const rounds =
-    result.jackpotRoundss?.items?.map((round: any) => ({
-      ...round,
-      roundNumber: round.id,
-      ticketsSold: round.ticketCountTotalBps,
-    })) || [];
+  const rounds = (result.jackpotRoundss?.items ?? []).map((round) => ({
+    ...round,
+    roundNumber: round.id,
+    ticketsSold: round.ticketCountTotalBps,
+  }));
 
   return {
     jackpotRounds: rounds,
-    totalCount: result.jackpotRoundss?.totalCount || 0,
+    totalCount: result.jackpotRoundss?.totalCount ?? 0,
   };
+}
+
+interface TicketsResponse {
+  tickets: Ticket[];
+  totalCount: number;
 }
 
 export async function executeQueryTickets(
   client: MegapotGraphQLClient,
   params: QueryTicketsParams
-): Promise<any> {
+): Promise<TicketsResponse> {
   const args = buildQueryArgs(params);
   const query = `
     query {
@@ -185,27 +220,25 @@ export async function executeQueryTickets(
   `;
 
   logger.debug({ query, params }, "Executing queryTickets");
-  const result = await client.query(query);
+  const result = await client.query<{ ticketss: GraphQLListResponse<Ticket> }>(query);
 
-  const tickets =
-    result.ticketss?.items?.map((ticket: any) => ({
-      ...ticket,
-      buyer: ticket.buyerAddress,
-      recipient: ticket.recipientAddress,
-      referrer: ticket.referrerAddress,
-      ticketNumber: ticket.id,
-    })) || [];
+  const tickets = result.ticketss?.items ?? [];
 
   return {
     tickets: tickets,
-    totalCount: result.ticketss?.totalCount || 0,
+    totalCount: result.ticketss?.totalCount ?? 0,
   };
+}
+
+interface LpsResponse {
+  liquidityProviders: (LiquidityProvider & { address: string })[];
+  totalCount: number;
 }
 
 export async function executeQueryLPs(
   client: MegapotGraphQLClient,
   params: QueryLiquidityProvidersParams
-): Promise<any> {
+): Promise<LpsResponse> {
   const args = buildQueryArgs(params);
   const query = `
     query {
@@ -225,21 +258,24 @@ export async function executeQueryLPs(
   `;
 
   logger.debug({ query, params }, "Executing queryLPs");
-  const result = await client.query(query);
+  const result = await client.query<{
+    liquidityProviderss: GraphQLListResponse<LiquidityProvider>;
+  }>(query);
 
-  const lps =
-    result.liquidityProviderss?.items?.map((lp: any) => ({
-      ...lp,
-      address: lp.id,
-    })) || [];
+  const lps = (result.liquidityProviderss?.items ?? []).map((lp) => ({
+    ...lp,
+    address: lp.id,
+  }));
 
   return {
     liquidityProviders: lps,
-    totalCount: result.liquidityProviderss?.totalCount || 0,
+    totalCount: result.liquidityProviderss?.totalCount ?? 0,
   };
 }
 
-export async function executeGetCurrentRound(client: MegapotGraphQLClient): Promise<any> {
+export async function executeGetCurrentRound(
+  client: MegapotGraphQLClient
+): Promise<RoundsResponse> {
   const query = `
     query {
       jackpotRoundss(where: { status: "ACTIVE" }, limit: 1, orderBy: "startTime", orderDirection: "desc") {
@@ -259,10 +295,10 @@ export async function executeGetCurrentRound(client: MegapotGraphQLClient): Prom
   `;
 
   logger.debug({ query }, "Executing getCurrentRound");
-  const result = await client.query(query);
+  const result = await client.query<{ jackpotRoundss: GraphQLListResponse<JackpotRound> }>(query);
 
   const round = result.jackpotRoundss?.items?.[0];
-  if (round) {
+  if (round !== undefined) {
     return {
       jackpotRounds: [
         {
@@ -271,12 +307,25 @@ export async function executeGetCurrentRound(client: MegapotGraphQLClient): Prom
           ticketsSold: round.ticketCountTotalBps,
         },
       ],
+      totalCount: 1,
     };
   }
-  return { jackpotRounds: [] };
+  return { jackpotRounds: [], totalCount: 0 };
 }
 
-export async function executeGetProtocolStats(client: MegapotGraphQLClient): Promise<any> {
+interface ProtocolStatsResponse {
+  hourlyStats: (HourlyStat & {
+    timestamp: number;
+    totalVolume: bigint;
+    uniqueUsers: number;
+    totalRounds: number;
+    activeUsers: number;
+  })[];
+}
+
+export async function executeGetProtocolStats(
+  client: MegapotGraphQLClient
+): Promise<ProtocolStatsResponse> {
   const query = `
     query {
       hourlyStatss(orderBy: "hourTimestamp", orderDirection: "desc", limit: 1) {
@@ -296,10 +345,10 @@ export async function executeGetProtocolStats(client: MegapotGraphQLClient): Pro
   `;
 
   logger.debug({ query }, "Executing getProtocolStats");
-  const result = await client.query(query);
+  const result = await client.query<{ hourlyStatss: GraphQLListResponse<HourlyStat> }>(query);
 
   const stats = result.hourlyStatss?.items?.[0];
-  if (stats) {
+  if (stats !== undefined) {
     return {
       hourlyStats: [
         {
@@ -316,10 +365,20 @@ export async function executeGetProtocolStats(client: MegapotGraphQLClient): Pro
   return { hourlyStats: [] };
 }
 
+interface UserStatsResponse {
+  user:
+    | (User & {
+        address: string;
+        tickets: (Ticket & { ticketNumber: string })[];
+        referrals: (Referral & { referredUser: string; totalFees: bigint })[];
+      })
+    | null;
+}
+
 export async function executeGetUserStats(
   client: MegapotGraphQLClient,
   params: GetUserStatsParams
-): Promise<any> {
+): Promise<UserStatsResponse> {
   const query = `
     query {
       users(where: { id: "${params.address}" }) {
@@ -335,7 +394,7 @@ export async function executeGetUserStats(
   `;
 
   logger.debug({ query, params }, "Executing getUserStats");
-  const result = await client.query(query);
+  const result = await client.query<{ users: User[] }>(query);
 
   const ticketsQuery = `
     query {
@@ -349,7 +408,7 @@ export async function executeGetUserStats(
     }
   `;
 
-  const ticketsResult = await client.query(ticketsQuery);
+  const ticketsResult = await client.query<{ ticketss: GraphQLListResponse<Ticket> }>(ticketsQuery);
 
   const referralsQuery = `
     query {
@@ -363,35 +422,45 @@ export async function executeGetUserStats(
     }
   `;
 
-  const referralsResult = await client.query(referralsQuery);
+  const referralsResult = await client.query<{ referralss: GraphQLListResponse<Referral> }>(
+    referralsQuery
+  );
 
   const user = result.users?.[0];
-  if (user) {
+  if (user !== undefined) {
     return {
       user: {
         ...user,
         address: user.id,
-        tickets:
-          ticketsResult.ticketss?.items?.map((ticket: any) => ({
-            ...ticket,
-            ticketNumber: ticket.id,
-          })) || [],
-        referrals:
-          referralsResult.referralss?.items?.map((referral: any) => ({
-            ...referral,
-            referredUser: referral.referredAddress,
-            totalFees: referral.totalFeesGenerated,
-          })) || [],
+        tickets: (ticketsResult.ticketss?.items ?? []).map((ticket) => ({
+          ...ticket,
+          ticketNumber: ticket.id,
+        })),
+        referrals: (referralsResult.referralss?.items ?? []).map((referral) => ({
+          ...referral,
+          referredUser: referral.referredAddress,
+          totalFees: referral.totalFeesGenerated,
+        })),
       },
     };
   }
   return { user: null };
 }
 
+interface LpStatsResponse {
+  liquidityProvider:
+    | (LiquidityProvider & {
+        address: string;
+        deposits: LpAction[];
+        withdrawals: LpAction[];
+      })
+    | null;
+}
+
 export async function executeGetLpStats(
   client: MegapotGraphQLClient,
   params: GetLpStatsParams
-): Promise<any> {
+): Promise<LpStatsResponse> {
   const query = `
     query {
       liquidityProviderss(where: { id: "${params.address}" }) {
@@ -409,7 +478,9 @@ export async function executeGetLpStats(
   `;
 
   logger.debug({ query, params }, "Executing getLpStats");
-  const result = await client.query(query);
+  const result = await client.query<{
+    liquidityProviderss: GraphQLListResponse<LiquidityProvider>;
+  }>(query);
 
   const actionsQuery = `
     query {
@@ -424,18 +495,22 @@ export async function executeGetLpStats(
     }
   `;
 
-  const actionsResult = await client.query(actionsQuery);
+  const actionsResult = await client.query<{ lpActionss: GraphQLListResponse<LpAction> }>(
+    actionsQuery
+  );
 
   const lp = result.liquidityProviderss?.items?.[0];
-  if (lp) {
-    const actions = actionsResult.lpActionss?.items || [];
+  if (lp !== undefined) {
+    const actions = actionsResult.lpActionss?.items ?? [];
     return {
       liquidityProvider: {
         ...lp,
         address: lp.id,
-        deposits: actions.filter((action: any) => action.actionType === "DEPOSIT").slice(0, 10),
+        deposits: actions
+          .filter((action) => action.actionType === LpActionType.DEPOSIT)
+          .slice(0, 10),
         withdrawals: actions
-          .filter((action: any) => action.actionType === "WITHDRAWAL")
+          .filter((action) => action.actionType === LpActionType.WITHDRAWAL)
           .slice(0, 10),
       },
     };
@@ -443,16 +518,21 @@ export async function executeGetLpStats(
   return { liquidityProvider: null };
 }
 
+interface LeaderboardResponse {
+  users?: (User & { address: string })[];
+  liquidityProviders?: (LiquidityProvider & { address: string })[];
+}
+
 export async function executeGetLeaderboard(
   client: MegapotGraphQLClient,
   params: GetLeaderboardParams
-): Promise<any> {
+): Promise<LeaderboardResponse> {
   let query: string;
 
   if (params.type === "users") {
     query = `
       query {
-        userss(orderBy: "totalWinnings", orderDirection: "desc", limit: ${params.first || 10}) {
+        userss(orderBy: "totalWinnings", orderDirection: "desc", limit: ${params.first ?? 10}) {
           items {
             id
             totalTicketsPurchased
@@ -466,7 +546,7 @@ export async function executeGetLeaderboard(
   } else if (params.type === "lps") {
     query = `
       query {
-        liquidityProviderss(orderBy: "totalFeesEarned", orderDirection: "desc", limit: ${params.first || 10}) {
+        liquidityProviderss(orderBy: "totalFeesEarned", orderDirection: "desc", limit: ${params.first ?? 10}) {
           items {
             id
             stake
@@ -479,25 +559,28 @@ export async function executeGetLeaderboard(
       }
     `;
   } else {
-    throw new MCPError(1002, `Unknown leaderboard type: ${params.type}`, { type: params.type });
+    throw new MCPError(1002, `Unknown leaderboard type: ${String(params.type)}`, {
+      type: params.type,
+    });
   }
 
   logger.debug({ query, params }, "Executing getLeaderboard");
-  const result = await client.query(query);
 
   if (params.type === "users") {
-    const users =
-      result.userss?.items?.map((user: any) => ({
-        ...user,
-        address: user.id,
-      })) || [];
+    const result = await client.query<{ userss: GraphQLListResponse<User> }>(query);
+    const users = (result.userss?.items ?? []).map((user) => ({
+      ...user,
+      address: user.id,
+    }));
     return { users };
   } else {
-    const lps =
-      result.liquidityProviderss?.items?.map((lp: any) => ({
-        ...lp,
-        address: lp.id,
-      })) || [];
+    const result = await client.query<{
+      liquidityProviderss: GraphQLListResponse<LiquidityProvider>;
+    }>(query);
+    const lps = (result.liquidityProviderss?.items ?? []).map((lp) => ({
+      ...lp,
+      address: lp.id,
+    }));
     return { liquidityProviders: lps };
   }
 }
@@ -505,7 +588,7 @@ export async function executeGetLeaderboard(
 export async function executeGetHourlyStats(
   client: MegapotGraphQLClient,
   params: GetHourlyStatsParams
-): Promise<any> {
+): Promise<ProtocolStatsResponse> {
   const args: string[] = [];
 
   const whereConditions: string[] = [];
@@ -545,17 +628,16 @@ export async function executeGetHourlyStats(
   `;
 
   logger.debug({ query, params }, "Executing getHourlyStats");
-  const result = await client.query(query);
+  const result = await client.query<{ hourlyStatss: GraphQLListResponse<HourlyStat> }>(query);
 
-  const stats =
-    result.hourlyStatss?.items?.map((stat: any) => ({
-      ...stat,
-      timestamp: stat.hourTimestamp,
-      totalVolume: stat.totalTicketsValue,
-      uniqueUsers: stat.uniquePlayers,
-      totalRounds: stat.roundsCompleted,
-      activeUsers: stat.uniquePlayers,
-    })) || [];
+  const stats = (result.hourlyStatss?.items ?? []).map((stat) => ({
+    ...stat,
+    timestamp: stat.hourTimestamp,
+    totalVolume: stat.totalTicketsValue,
+    uniqueUsers: stat.uniquePlayers,
+    totalRounds: stat.roundsCompleted,
+    activeUsers: stat.uniquePlayers,
+  }));
 
   return { hourlyStats: stats };
 }
@@ -573,25 +655,51 @@ export const toolExecutors = {
   getLeaderboard: executeGetLeaderboard,
   getHourlyStats: executeGetHourlyStats,
 
-  subscribeToRound: async (_client: MegapotGraphQLClient, params: SubscriptionParams) => {
-    throw new MCPError(1003, "Subscription functionality not yet implemented", { params });
+  subscribeToRound: (_client: MegapotGraphQLClient, params: SubscriptionParams): Promise<never> => {
+    return Promise.reject(
+      new MCPError(1003, "Subscription functionality not yet implemented", { params })
+    );
   },
-  unsubscribeFromRound: async (_client: MegapotGraphQLClient, params: SubscriptionParams) => {
-    throw new MCPError(1003, "Subscription functionality not yet implemented", { params });
+  unsubscribeFromRound: (
+    _client: MegapotGraphQLClient,
+    params: SubscriptionParams
+  ): Promise<never> => {
+    return Promise.reject(
+      new MCPError(1003, "Subscription functionality not yet implemented", { params })
+    );
   },
 };
+
+type ToolResult =
+  | UsersResponse
+  | RoundsResponse
+  | TicketsResponse
+  | LpsResponse
+  | ProtocolStatsResponse
+  | UserStatsResponse
+  | LpStatsResponse
+  | LeaderboardResponse;
 
 export async function executeTool(
   client: MegapotGraphQLClient,
   toolName: string,
-  validatedParams: any
-): Promise<any> {
+  validatedParams:
+    | QueryUsersParams
+    | QueryRoundsParams
+    | QueryTicketsParams
+    | QueryLiquidityProvidersParams
+    | GetUserStatsParams
+    | GetLpStatsParams
+    | GetLeaderboardParams
+    | GetHourlyStatsParams
+    | SubscriptionParams
+): Promise<ToolResult> {
   logger.info("=== executeTool START ===");
   logger.info({ toolName, validatedParams }, "Tool execution request");
 
   const executor = toolExecutors[toolName as keyof typeof toolExecutors];
 
-  if (!executor) {
+  if (executor === undefined) {
     logger.error(
       { toolName, availableTools: Object.keys(toolExecutors) },
       "Unknown tool requested"
@@ -602,17 +710,21 @@ export async function executeTool(
   try {
     logger.info({ toolName }, "Found executor for tool, calling it now");
 
-    let result;
-    if (toolName === "getCurrentRound" || toolName === "getProtocolStats") {
-      result = await (executor as any)(client);
+    let result: ToolResult;
+    if (toolName === "getCurrentRound") {
+      result = await executeGetCurrentRound(client);
+    } else if (toolName === "getProtocolStats") {
+      result = await executeGetProtocolStats(client);
     } else {
-      result = await (executor as any)(client, validatedParams);
+      result = await (
+        executor as (
+          client: MegapotGraphQLClient,
+          params: typeof validatedParams
+        ) => Promise<ToolResult>
+      )(client, validatedParams);
     }
 
-    logger.info(
-      { toolName, resultKeys: result ? Object.keys(result) : [] },
-      "Tool execution completed"
-    );
+    logger.info({ toolName, resultKeys: Object.keys(result) }, "Tool execution completed");
     logger.info("=== executeTool SUCCESS ===");
 
     return result;

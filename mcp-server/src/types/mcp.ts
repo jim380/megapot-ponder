@@ -189,7 +189,7 @@ export const parseResourceUri = (uri: string): { type: string; id?: string | und
 
   for (const { regex, type } of patterns) {
     const match = uri.match(regex);
-    if (match && match[1]) {
+    if (match !== null && match[1] !== undefined && match[1] !== null && match[1] !== "") {
       return { type, id: match[1] };
     }
   }

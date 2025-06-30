@@ -8,11 +8,11 @@ process.on("uncaughtException", (error) => {
   process.exit(1);
 });
 
-process.on("unhandledRejection", (reason, promise) => {
+process.on("unhandledRejection", (reason: unknown, promise: Promise<unknown>) => {
   logger.fatal(
     {
       reason,
-      promise: promise.toString(),
+      promise: String(promise),
     },
     "Unhandled Promise Rejection"
   );

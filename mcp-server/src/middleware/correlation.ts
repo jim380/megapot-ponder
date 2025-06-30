@@ -39,7 +39,7 @@ export function extractOrGenerateCorrelationId(
 
   for (const header of correlationHeaders) {
     const value = headers[header];
-    if (value && typeof value === "string") {
+    if (value !== undefined && typeof value === "string") {
       return value;
     }
   }
@@ -78,7 +78,13 @@ export function httpCorrelationMiddleware(
   );
 
   const originalEnd = res.end.bind(res);
-  (res as any).end = function (...args: any[]): any {
+
+  const newEnd: typeof res.end = function (
+    this: ServerResponse,
+    chunkOrCallback?: (() => void) | string | Buffer,
+    encodingOrCallback?: BufferEncoding | (() => void),
+    callback?: () => void
+  ): ServerResponse {
     const duration = Date.now() - correlatedReq.startTime;
 
     correlatedReq.logger.info(
@@ -87,13 +93,32 @@ export function httpCorrelationMiddleware(
         url: req.url,
         statusCode: res.statusCode,
         duration,
-        bytesWritten: (res as any).bytesWritten || 0,
+        bytesWritten:
+          "bytesWritten" in res && typeof res.bytesWritten === "number" ? res.bytesWritten : 0,
       },
       "Request completed"
     );
 
-    return originalEnd(...args);
+    if (typeof chunkOrCallback === "function") {
+      return originalEnd(chunkOrCallback);
+    } else if (chunkOrCallback !== undefined && typeof encodingOrCallback === "function") {
+      return originalEnd(chunkOrCallback, encodingOrCallback);
+    } else if (
+      chunkOrCallback !== undefined &&
+      encodingOrCallback !== undefined &&
+      callback !== undefined
+    ) {
+      return originalEnd(chunkOrCallback, encodingOrCallback as BufferEncoding, callback);
+    } else if (chunkOrCallback !== undefined && encodingOrCallback !== undefined) {
+      return originalEnd(chunkOrCallback, encodingOrCallback as BufferEncoding);
+    } else if (chunkOrCallback !== undefined) {
+      return originalEnd(chunkOrCallback);
+    } else {
+      return originalEnd();
+    }
   };
+
+  res.end = newEnd;
 
   next();
 }
@@ -106,9 +131,9 @@ export class MCPCorrelation {
     const context: CorrelationContext = {
       requestId,
       sessionId,
-      parentId: parentId || undefined,
+      parentId: parentId ?? undefined,
       spanId: generateCorrelationId(),
-      traceId: parentId || requestId,
+      traceId: parentId ?? requestId,
       startTime: Date.now(),
     };
 
@@ -128,7 +153,7 @@ export class MCPCorrelation {
     const now = Date.now();
     const expired: string[] = [];
 
-    for (const [requestId, context] of this.contexts.entries()) {
+    for (const [requestId, context] of Array.from(this.contexts.entries())) {
       if (now - context.startTime > maxAge) {
         expired.push(requestId);
       }
@@ -139,7 +164,18 @@ export class MCPCorrelation {
     }
   }
 
-  static correlateMessage(message: any, context: CorrelationContext): any {
+  static correlateMessage<T extends Record<string, unknown>>(
+    message: T,
+    context: CorrelationContext
+  ): T & {
+    _correlation: {
+      requestId: string;
+      sessionId: string | undefined;
+      spanId: string | undefined;
+      traceId: string | undefined;
+      timestamp: string;
+    };
+  } {
     return {
       ...message,
       _correlation: {
@@ -152,17 +188,26 @@ export class MCPCorrelation {
     };
   }
 
-  static extractCorrelation(message: any): CorrelationContext | undefined {
-    if (!message._correlation) {
+  static extractCorrelation(message: unknown): CorrelationContext | undefined {
+    if (
+      typeof message !== "object" ||
+      message === null ||
+      !("_correlation" in message) ||
+      typeof message._correlation !== "object" ||
+      message._correlation === null
+    ) {
       return undefined;
     }
 
+    const correlation = message._correlation as Record<string, unknown>;
+
     return {
-      requestId: message._correlation.requestId,
-      sessionId: message._correlation.sessionId,
-      parentId: message._correlation.requestId,
-      spanId: message._correlation.spanId,
-      traceId: message._correlation.traceId,
+      requestId: typeof correlation["requestId"] === "string" ? correlation["requestId"] : "",
+      sessionId:
+        typeof correlation["sessionId"] === "string" ? correlation["sessionId"] : undefined,
+      parentId: typeof correlation["requestId"] === "string" ? correlation["requestId"] : undefined,
+      spanId: typeof correlation["spanId"] === "string" ? correlation["spanId"] : undefined,
+      traceId: typeof correlation["traceId"] === "string" ? correlation["traceId"] : undefined,
       startTime: Date.now(),
     };
   }
@@ -181,10 +226,10 @@ export function buildCorrelationHeaders(context: CorrelationContext): Record<str
   return {
     [CORRELATION_HEADERS.REQUEST_ID]: context.requestId,
     [CORRELATION_HEADERS.CORRELATION_ID]: context.requestId,
-    [CORRELATION_HEADERS.SESSION_ID]: context.sessionId || "",
-    [CORRELATION_HEADERS.TRACE_ID]: context.traceId || context.requestId,
-    [CORRELATION_HEADERS.SPAN_ID]: context.spanId || context.requestId,
-    [CORRELATION_HEADERS.PARENT_ID]: context.parentId || "",
+    [CORRELATION_HEADERS.SESSION_ID]: context.sessionId ?? "",
+    [CORRELATION_HEADERS.TRACE_ID]: context.traceId ?? context.requestId,
+    [CORRELATION_HEADERS.SPAN_ID]: context.spanId ?? context.requestId,
+    [CORRELATION_HEADERS.PARENT_ID]: context.parentId ?? "",
   };
 }
 
@@ -192,7 +237,7 @@ export function parseCorrelationHeaders(
   headers: Record<string, string | string[] | undefined>
 ): Partial<CorrelationContext> {
   const getHeader = (name: string): string | undefined => {
-    const value = headers[name] || headers[name.toLowerCase()];
+    const value = headers[name] ?? headers[name.toLowerCase()];
     return typeof value === "string" ? value : undefined;
   };
 
@@ -202,7 +247,7 @@ export function parseCorrelationHeaders(
   if (requestId !== undefined) result.requestId = requestId;
 
   const sessionId = getHeader(CORRELATION_HEADERS.SESSION_ID);
-  if (sessionId !== undefined) result.sessionId = sessionId;
+  if (sessionId !== undefined && sessionId !== "") result.sessionId = sessionId;
 
   const parentId = getHeader(CORRELATION_HEADERS.PARENT_ID);
   if (parentId !== undefined) result.parentId = parentId;

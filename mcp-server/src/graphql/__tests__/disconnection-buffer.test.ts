@@ -63,9 +63,12 @@ describe("DisconnectionBuffer", () => {
       expect(call![0]).toBe("sub1");
       expect(call![1]).toHaveLength(3);
 
-      expect(call![1][0]?.data.message).toBe("update1");
-      expect(call![1][1]?.data.message).toBe("update2");
-      expect(call![1][2]?.data.message).toBe("update3");
+      const update1 = call![1][0]?.data as { message: string };
+      const update2 = call![1][1]?.data as { message: string };
+      const update3 = call![1][2]?.data as { message: string };
+      expect(update1.message).toBe("update1");
+      expect(update2.message).toBe("update2");
+      expect(update3.message).toBe("update3");
     });
   });
 
@@ -85,8 +88,10 @@ describe("DisconnectionBuffer", () => {
       const updates = mockReplayHandler.mock.calls[0]?.[1];
       expect(updates).toBeDefined();
 
-      expect(updates![0]?.data.message).toBe("update3");
-      expect(updates![4]?.data.message).toBe("update7");
+      const firstUpdate = updates![0]?.data as { message: string };
+      const lastUpdate = updates![4]?.data as { message: string };
+      expect(firstUpdate.message).toBe("update3");
+      expect(lastUpdate.message).toBe("update7");
     });
 
     it("should emit bufferOverflow event when total capacity is exceeded", () => {

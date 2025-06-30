@@ -15,13 +15,20 @@ import type {
   InitializeRequest,
   InitializeResult,
   ListResourcesRequest,
+  ListResourcesResult,
   ReadResourceRequest,
+  ReadResourceResult,
   ListPromptsRequest,
+  ListPromptsResult,
   GetPromptRequest,
+  GetPromptResult,
   CallToolRequest,
+  CallToolResult,
   CompleteRequest,
+  CompleteResult,
   ServerCapabilities,
   ListToolsRequest,
+  ListToolsResult,
 } from "@modelcontextprotocol/sdk/types.js";
 import http from "node:http";
 import { URL } from "node:url";
@@ -147,8 +154,9 @@ export class MegapotMCPServer extends Server {
     });
   }
 
-  private async handleInitialize(request: InitializeRequest): Promise<InitializeResult> {
-    const correlationContext = MCPCorrelation.createContext(this.currentSession?.id || "init");
+  private handleInitialize(request: InitializeRequest): Promise<InitializeResult> {
+    const sessionId = this.currentSession?.id ?? "init";
+    const correlationContext = MCPCorrelation.createContext(sessionId);
     const requestLogger = createRequestLogger(correlationContext.requestId);
     const timer = createTimer();
 
@@ -165,7 +173,7 @@ export class MegapotMCPServer extends Server {
       const clientVersion = request.params.protocolVersion;
       let negotiatedVersion: string;
 
-      if (SUPPORTED_PROTOCOL_VERSIONS.includes(clientVersion as any)) {
+      if (SUPPORTED_PROTOCOL_VERSIONS.includes(clientVersion as typeof SUPPORTED_PROTOCOL_VERSIONS[number])) {
         negotiatedVersion = clientVersion;
       } else {
         negotiatedVersion = SUPPORTED_PROTOCOL_VERSIONS[0];
@@ -216,16 +224,16 @@ export class MegapotMCPServer extends Server {
         negotiatedVersion,
       });
 
-      return result;
+      return Promise.resolve(result);
     } finally {
       MCPCorrelation.removeContext(correlationContext.requestId);
     }
   }
 
-  private async withSessionAndCorrelation<T, R>(
+  private withSessionAndCorrelation<T, R>(
     handlerName: string,
-    handler: (request: T, context: CorrelationContext, logger: any) => Promise<R>
-  ): Promise<(request: T) => Promise<R>> {
+    handler: (request: T, context: CorrelationContext, logger: ReturnType<typeof createRequestLogger>) => Promise<R>
+  ): (request: T) => Promise<R> {
     return async (request: T): Promise<R> => {
       if (!this.currentSession) {
         throw new Error("Session not initialized");
@@ -260,7 +268,7 @@ export class MegapotMCPServer extends Server {
 
         return result;
       } catch (error) {
-        logError(requestLogger, error, `Error in ${handlerName}`, {
+        logError(requestLogger, error as Error, `Error in ${handlerName}`, {
           handler: handlerName,
           sessionId: this.currentSession.id,
         });
@@ -271,13 +279,13 @@ export class MegapotMCPServer extends Server {
     };
   }
 
-  private async handleListTools(_request: ListToolsRequest) {
-    const handler = await this.withSessionAndCorrelation(
+  private async handleListTools(_request: ListToolsRequest): Promise<ListToolsResult> {
+    const handler = this.withSessionAndCorrelation<ListToolsRequest, ListToolsResult>(
       "listTools",
-      async (_req, _context, logger) => {
+      (_req, _context, logger) => {
         logger.info("Listing tools");
 
-        return {
+        return Promise.resolve({
           tools: [
             {
               name: "queryUsers",
@@ -453,19 +461,19 @@ export class MegapotMCPServer extends Server {
               },
             },
           ],
-        };
+        });
       }
     );
     return handler(_request);
   }
 
-  private async handleListResources(_request: ListResourcesRequest) {
-    const handler = await this.withSessionAndCorrelation(
+  private async handleListResources(_request: ListResourcesRequest): Promise<ListResourcesResult> {
+    const handler = this.withSessionAndCorrelation<ListResourcesRequest, ListResourcesResult>(
       "listResources",
-      async (_req, _context, logger) => {
+      (_req, _context, logger) => {
         logger.info("Listing resources");
 
-        return {
+        return Promise.resolve({
           resources: [
             {
               uri: buildResourceUri.user("{id}"),
@@ -499,14 +507,14 @@ export class MegapotMCPServer extends Server {
               mimeType: "application/json",
             },
           ],
-        };
+        });
       }
     );
     return handler(_request);
   }
 
-  private async handleReadResource(_request: ReadResourceRequest) {
-    const handler = await this.withSessionAndCorrelation(
+  private async handleReadResource(_request: ReadResourceRequest): Promise<ReadResourceResult> {
+    const handler = this.withSessionAndCorrelation<ReadResourceRequest, ReadResourceResult>(
       "readResource",
       async (req: ReadResourceRequest, _context, logger) => {
         logger.info({ uri: req.params.uri }, "Reading resource");
@@ -522,7 +530,7 @@ export class MegapotMCPServer extends Server {
           const { type, id } = parsed;
           logger.debug({ type, id }, "Parsed resource URI");
 
-          let data: any;
+          let data: unknown;
 
           switch (type) {
             case "user":
@@ -546,7 +554,7 @@ export class MegapotMCPServer extends Server {
               );
               break;
             case "stats":
-              if (id?.startsWith("hourly/")) {
+              if (id != null && id.startsWith("hourly/")) {
                 const timestamp = id.replace("hourly/", "");
                 data = await this.graphqlClient.query(
                   `query { hourlyStats(where: { timestamp: "${timestamp}" }) { timestamp totalVolume uniqueUsers } }`
@@ -561,7 +569,7 @@ export class MegapotMCPServer extends Server {
               throw new MCPError(1001, `Unknown resource type: ${type}`, { uri: req.params.uri });
           }
 
-          const response: MegapotResponse<any> = {
+          const response: MegapotResponse<unknown> = {
             data,
             metadata: {
               timestamp: Date.now(),
@@ -583,7 +591,7 @@ export class MegapotMCPServer extends Server {
             throw error;
           }
 
-          const mcpError = mapGraphQLError(error);
+          const mcpError = mapGraphQLError(error as Error);
           logger.error(
             {
               error: mcpError.message,
@@ -599,25 +607,25 @@ export class MegapotMCPServer extends Server {
     return handler(_request);
   }
 
-  private async handleListPrompts(_request: ListPromptsRequest) {
-    const handler = await this.withSessionAndCorrelation(
+  private async handleListPrompts(_request: ListPromptsRequest): Promise<ListPromptsResult> {
+    const handler = this.withSessionAndCorrelation<ListPromptsRequest, ListPromptsResult>(
       "listPrompts",
-      async (_req, _context, logger) => {
+      (_req, _context, logger) => {
         logger.info("Listing prompts");
 
-        return { prompts: [] };
+        return Promise.resolve({ prompts: [] });
       }
     );
     return handler(_request);
   }
 
-  private async handleGetPrompt(_request: GetPromptRequest) {
-    const handler = await this.withSessionAndCorrelation(
+  private async handleGetPrompt(_request: GetPromptRequest): Promise<GetPromptResult> {
+    const handler = this.withSessionAndCorrelation<GetPromptRequest, GetPromptResult>(
       "getPrompt",
-      async (req: GetPromptRequest, _context, logger) => {
+      (req: GetPromptRequest, _context, logger) => {
         logger.info({ name: req.params.name }, "Getting prompt");
 
-        return {
+        return Promise.resolve({
           description: "Prompt description placeholder",
           messages: [
             {
@@ -628,14 +636,14 @@ export class MegapotMCPServer extends Server {
               },
             },
           ],
-        };
+        });
       }
     );
     return handler(_request);
   }
 
-  private async handleCallTool(_request: CallToolRequest) {
-    const handler = await this.withSessionAndCorrelation(
+  private async handleCallTool(_request: CallToolRequest): Promise<CallToolResult> {
+    const handler = this.withSessionAndCorrelation<CallToolRequest, CallToolResult>(
       "callTool",
       async (req: CallToolRequest, _context, logger) => {
         logger.info(
@@ -657,13 +665,17 @@ export class MegapotMCPServer extends Server {
             "Tool parameters validated successfully"
           );
 
-          const result = await executeTool(this.graphqlClient, toolName, validatedParams);
+          const result = await executeTool(
+            this.graphqlClient, 
+            toolName, 
+            validatedParams as Parameters<typeof executeTool>[2]
+          ) as unknown;
 
-          const response: MegapotResponse<any> = {
+          const response: MegapotResponse<unknown> = {
             data: result,
             metadata: {
               timestamp: Date.now(),
-              totalCount: Array.isArray(result?.data) ? result.data.length : 1,
+              totalCount: (result != null && typeof result === 'object' && 'data' in result && Array.isArray((result as { data: unknown[] }).data)) ? (result as { data: unknown[] }).data.length : 1,
             },
           };
 
@@ -689,7 +701,7 @@ export class MegapotMCPServer extends Server {
             throw error;
           }
 
-          const mcpError = mapGraphQLError(error);
+          const mcpError = mapGraphQLError(error as Error);
           logger.error(
             {
               error: mcpError.message,
@@ -705,10 +717,10 @@ export class MegapotMCPServer extends Server {
     return handler(_request);
   }
 
-  private async handleComplete(_request: CompleteRequest) {
-    const handler = await this.withSessionAndCorrelation(
+  private async handleComplete(_request: CompleteRequest): Promise<CompleteResult> {
+    const handler = this.withSessionAndCorrelation<CompleteRequest, CompleteResult>(
       "complete",
-      async (req: CompleteRequest, _context, logger) => {
+      (req: CompleteRequest, _context, logger) => {
         logger.info(
           {
             ref: req.params.ref,
@@ -717,14 +729,14 @@ export class MegapotMCPServer extends Server {
           "Handling completion"
         );
 
-        return { completion: { values: [] } };
+        return Promise.resolve({ completion: { values: [] } });
       }
     );
     return handler(_request);
   }
 
   private setupGracefulShutdown(): void {
-    const shutdown = async (signal: string) => {
+    const shutdown = async (signal: string): Promise<void> => {
       if (this.isShuttingDown) return;
 
       this.isShuttingDown = true;
@@ -742,13 +754,13 @@ export class MegapotMCPServer extends Server {
         logger.info("Server closed successfully");
         process.exit(0);
       } catch (error) {
-        logError(logger, error, "Error during shutdown");
+        logError(logger, error as Error, "Error during shutdown");
         process.exit(1);
       }
     };
 
-    process.on("SIGINT", () => shutdown("SIGINT"));
-    process.on("SIGTERM", () => shutdown("SIGTERM"));
+    process.on("SIGINT", () => { void shutdown("SIGINT"); });
+    process.on("SIGTERM", () => { void shutdown("SIGTERM"); });
   }
 
   setTransportType(type: TransportType): void {
@@ -757,14 +769,15 @@ export class MegapotMCPServer extends Server {
 }
 
 export class TransportFactory {
-  static async create(type: "stdio" | "http", server: MegapotMCPServer): Promise<void> {
+  static create(type: "stdio" | "http", server: MegapotMCPServer): Promise<void> {
     switch (type) {
       case "stdio":
         return this.createStdioTransport(server);
       case "http":
-        return this.createHttpTransport(server);
+        this.createHttpTransport(server);
+        return Promise.resolve();
       default:
-        throw new Error(`Unknown transport type: ${type}`);
+        throw new Error(`Unknown transport type: ${type as string}`);
     }
   }
 
@@ -778,27 +791,27 @@ export class TransportFactory {
 
       logger.info("Stdio transport connected");
     } catch (error) {
-      logError(logger, error, "Failed to create stdio transport");
+      logError(logger, error as Error, "Failed to create stdio transport");
       throw error;
     }
   }
 
-  private static async createHttpTransport(server: MegapotMCPServer): Promise<void> {
+  private static createHttpTransport(server: MegapotMCPServer): void {
     const config = getConfig();
-    const port = config.transport.http?.port || 3001;
-    const host = config.transport.http?.host || "0.0.0.0";
+    const port = config.transport.http?.port ?? 3001;
+    const host = config.transport.http?.host ?? "0.0.0.0";
 
     logger.info({ port, host }, "Starting HTTP+SSE transport");
 
     server.setTransportType("http-sse");
 
-    const httpServer = http.createServer(async (req, res) => {
-      httpCorrelationMiddleware(req, res, async () => {
+    const httpServer = http.createServer((req, res) => {
+      httpCorrelationMiddleware(req, res, () => {
         const correlatedReq = req as CorrelatedRequest;
 
-        const url = new URL(req.url || "/", `http://${req.headers.host}`);
+        const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
 
-        const corsOrigins = config.transport.http?.corsOrigins || ["*"];
+        const corsOrigins = config.transport.http?.corsOrigins ?? ["*"];
         res.setHeader("Access-Control-Allow-Origin", corsOrigins.join(", "));
         res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
         res.setHeader(
@@ -819,7 +832,7 @@ export class TransportFactory {
             JSON.stringify({
               status: "ok",
               version: config.version,
-              sessions: server["sessionManager"].getStatistics(),
+              sessions: (server as unknown as { sessionManager: SessionManager }).sessionManager.getStatistics(),
               uptime: process.uptime(),
             })
           );
@@ -830,7 +843,7 @@ export class TransportFactory {
           res.writeHead(200, { "Content-Type": "application/json" });
           res.end(
             JSON.stringify({
-              sessions: server["sessionManager"].getStatistics(),
+              sessions: (server as unknown as { sessionManager: SessionManager }).sessionManager.getStatistics(),
               uptime: process.uptime(),
               memory: process.memoryUsage(),
               correlationId: correlatedReq.correlationId,
@@ -850,7 +863,7 @@ export class TransportFactory {
           );
 
           const transport = new SSEServerTransport(url.pathname, res);
-          await server.connect(transport);
+          void server.connect(transport);
           return;
         }
 
@@ -876,22 +889,25 @@ export class TransportFactory {
       );
     });
 
-    httpServer.on("error", (error) => {
+    httpServer.on("error", (error: Error) => {
       logError(logger, error, "HTTP server error");
       process.exit(1);
     });
 
-    const connections = new Set<any>();
-    httpServer.on("connection", (conn) => {
+    interface SocketWithDestroy extends NodeJS.Socket {
+      destroy(): void;
+    }
+    const connections = new Set<SocketWithDestroy>();
+    httpServer.on("connection", (conn: SocketWithDestroy) => {
       connections.add(conn);
-      conn.on("close", () => connections.delete(conn));
+      conn.on("close", () => { connections.delete(conn); });
     });
 
     process.on("SIGTERM", () => {
       httpServer.close(() => {
         logger.info("HTTP server closed");
       });
-      connections.forEach((conn) => conn.destroy());
+      connections.forEach((conn) => { conn.destroy(); });
     });
   }
 }
@@ -915,7 +931,7 @@ export async function main(): Promise<void> {
 
     const server = new MegapotMCPServer();
 
-    await TransportFactory.create(transportType, server);
+    await TransportFactory.create(transportType as "stdio" | "http", server);
 
     logger.info(
       {
@@ -932,19 +948,19 @@ export async function main(): Promise<void> {
       logger.fatal(
         {
           error: error.message,
-          field: (error as any).field,
+          field: (error as Error & { field?: string }).field,
         },
         "Configuration error"
       );
     } else {
-      logError(logger, error, "Failed to start server");
+      logError(logger, error as Error, "Failed to start server");
     }
     process.exit(1);
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
-  main().catch((error) => {
+if (import.meta.url === `file://${process.argv[1] ?? ""}`) {
+  void main().catch((error: unknown) => {
     console.error("Failed to start server:", error);
     process.exit(1);
   });

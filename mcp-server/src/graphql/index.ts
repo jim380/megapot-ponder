@@ -39,7 +39,7 @@ export {
   HOURLY_STATS_FIELDS,
 } from "./queries.js";
 
-export async function queryUser(address: string) {
+export async function queryUser(address: string): Promise<unknown> {
   const { getGraphQLClient } = await import("./client.js");
   const { queries } = await import("./queries.js");
   const client = getGraphQLClient();
@@ -48,21 +48,21 @@ export async function queryUser(address: string) {
   });
 }
 
-export async function queryCurrentRound() {
+export async function queryCurrentRound(): Promise<unknown> {
   const { getGraphQLClient } = await import("./client.js");
   const { queries } = await import("./queries.js");
   const client = getGraphQLClient();
   return client.query(queries.GET_CURRENT_ROUND);
 }
 
-export async function queryProtocolStats() {
+export async function queryProtocolStats(): Promise<unknown> {
   const { getGraphQLClient } = await import("./client.js");
   const { queries } = await import("./queries.js");
   const client = getGraphQLClient();
   return client.query(queries.GET_PROTOCOL_STATS);
 }
 
-export async function subscribeToRoundUpdates(handler: any) {
+export async function subscribeToRoundUpdates(handler: (data: unknown) => void): Promise<import("./client.js").SubscriptionRef> {
   const { getGraphQLClient } = await import("./client.js");
   const { subscriptions } = await import("./subscriptions.js");
   const client = getGraphQLClient();

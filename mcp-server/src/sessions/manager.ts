@@ -349,7 +349,14 @@ export class SessionManager extends EventEmitter {
     return counts;
   }
 
-  getStatistics() {
+  getStatistics(): {
+    totalSessions: number;
+    byState: Record<SessionState, number>;
+    byTransport: Record<TransportType, number>;
+    averageSessionDuration: number;
+    totalRequests: number;
+    rateLimitExceeded: number;
+  } {
     const sessions = Array.from(this.sessions.values());
     const now = Date.now();
 

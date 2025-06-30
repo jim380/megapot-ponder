@@ -5,7 +5,7 @@ const logger = getLogger("disconnection-buffer");
 
 export interface BufferedUpdate {
   subscriptionId: string;
-  data: any;
+  data: unknown;
   timestamp: number;
   sequenceNumber: number;
 }
@@ -166,7 +166,7 @@ export class DisconnectionBuffer extends EventEmitter {
     this.sequenceCounter = 0;
   }
 
-  bufferUpdate(subscriptionId: string, data: any): void {
+  bufferUpdate(subscriptionId: string, data: unknown): void {
     if (!this.isBuffering) {
       return;
     }

@@ -9,7 +9,7 @@ export class MCPError extends Error {
 
     Object.setPrototypeOf(this, new.target.prototype);
 
-    if (Error.captureStackTrace) {
+    if (typeof Error.captureStackTrace === "function") {
       Error.captureStackTrace(this, this.constructor);
     }
   }
@@ -45,7 +45,7 @@ export class InvalidResourceUriError extends MCPError {
 
 export class UnsupportedOperationError extends MCPError {
   constructor(operation: string, reason?: string) {
-    super(1003, `Unsupported operation: ${operation}${reason ? ` - ${reason}` : ""}`, {
+    super(1003, `Unsupported operation: ${operation}${reason != null ? ` - ${reason}` : ""}`, {
       operation,
       reason,
     });
@@ -96,11 +96,15 @@ export class GraphQLTimeoutError extends MCPError {
 
 export class WebSocketDisconnectionError extends MCPError {
   constructor(outageMs: number, subscriptionCount: number, bufferSize: number) {
-    super(1105, `WebSocket outage exceeded buffer duration: ${outageMs}ms with ${subscriptionCount} subscriptions (${bufferSize} buffered updates)`, {
-      outageMs,
-      subscriptionCount,
-      bufferSize,
-    });
+    super(
+      1105,
+      `WebSocket outage exceeded buffer duration: ${outageMs}ms with ${subscriptionCount} subscriptions (${bufferSize} buffered updates)`,
+      {
+        outageMs,
+        subscriptionCount,
+        bufferSize,
+      }
+    );
   }
 }
 
@@ -180,31 +184,57 @@ export class InitializationError extends MCPError {
   }
 }
 
-export function mapGraphQLError(error: any): MCPError {
-  if (error.networkError) {
-    return new GraphQLConnectionError(error.networkError.url || "unknown", error.networkError);
+interface GraphQLError {
+  message?: string;
+  extensions?: {
+    code?: string;
+    [key: string]: unknown;
+  };
+}
+
+interface GraphQLRequestError {
+  networkError?: {
+    url?: string;
+    [key: string]: unknown;
+  };
+  graphQLErrors?: GraphQLError[];
+  message?: string;
+}
+
+export function mapGraphQLError(error: unknown): MCPError {
+  const isGraphQLRequestError = (err: unknown): err is GraphQLRequestError => {
+    return err != null && typeof err === "object";
+  };
+
+  if (!isGraphQLRequestError(error)) {
+    return new InternalServerError("Unexpected error type", error);
+  }
+
+  if (error.networkError != null) {
+    return new GraphQLConnectionError(error.networkError.url ?? "unknown", error.networkError);
   }
 
   if (error.graphQLErrors && Array.isArray(error.graphQLErrors) && error.graphQLErrors.length > 0) {
     const gqlError = error.graphQLErrors[0];
 
-    if (gqlError.message?.includes("complexity")) {
+    if (gqlError && gqlError.message != null && gqlError.message.includes("complexity")) {
       const complexityMatch = gqlError.message.match(/complexity (\d+) exceeds maximum (\d+)/);
-      if (complexityMatch) {
+      if (complexityMatch != null && complexityMatch[1] != null && complexityMatch[2] != null) {
         return new QueryComplexityError(parseInt(complexityMatch[1]), parseInt(complexityMatch[2]));
       }
     }
 
-    if (gqlError.extensions?.code === "GRAPHQL_VALIDATION_FAILED") {
+    if (gqlError && gqlError.extensions?.code === "GRAPHQL_VALIDATION_FAILED") {
       return new SchemaValidationError(error.graphQLErrors);
     }
 
-    return new GraphQLQueryError(gqlError.message || "Unknown GraphQL error", error);
+    return new GraphQLQueryError(gqlError?.message ?? "Unknown GraphQL error", error);
   }
 
-  if (error.message?.includes("timeout")) {
+  if (error.message != null && error.message.includes("timeout")) {
     const timeoutMatch = error.message.match(/(\d+)ms/);
-    const timeoutMs = timeoutMatch ? parseInt(timeoutMatch[1]) : 30000;
+    const timeoutMs =
+      timeoutMatch != null && timeoutMatch[1] != null ? parseInt(timeoutMatch[1]) : 30000;
     return new GraphQLTimeoutError(timeoutMs);
   }
 

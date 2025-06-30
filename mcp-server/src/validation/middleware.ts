@@ -1,4 +1,4 @@
-import Ajv, { type ErrorObject } from "ajv";
+import Ajv, { type ErrorObject, type SchemaObject } from "ajv";
 import addFormats from "ajv-formats";
 import type { JSONSchema7 } from "json-schema";
 import type { CallToolRequest } from "@modelcontextprotocol/sdk/types.js";
@@ -33,7 +33,7 @@ ajv.addFormat("bigint-string", {
   validate: (value: string) => /^[0-9]+$/.test(value),
 });
 
-export interface ValidationResult<T = any> {
+export interface ValidationResult<T = unknown> {
   valid: boolean;
   data?: T;
   errors?: ValidationError[];
@@ -42,55 +42,95 @@ export interface ValidationResult<T = any> {
 export interface ValidationError {
   field: string;
   message: string;
-  value?: any;
-  allowedValues?: any[];
+  value?: unknown;
+  allowedValues?: unknown[];
+}
+
+interface RequiredParams {
+  missingProperty: string;
+}
+
+interface EnumParams {
+  allowedValues: unknown[];
+}
+
+interface PatternParams {
+  pattern: string;
+}
+
+interface LimitParams {
+  limit: number;
+}
+
+interface TypeParams {
+  type: string;
+}
+
+interface AdditionalPropertiesParams {
+  additionalProperty: string;
 }
 
 function formatValidationErrors(errors: ErrorObject[]): ValidationError[] {
   return errors.map((error) => {
     const field = error.instancePath || error.schemaPath || "root";
-    let message = error.message || "Validation failed";
+    let message = error.message ?? "Validation failed";
+    let allowedValues: unknown[] | undefined;
 
     switch (error.keyword) {
-      case "required":
-        message = `Missing required field: ${error.params?.["missingProperty"]}`;
+      case "required": {
+        const params = error.params as RequiredParams;
+        message = `Missing required field: ${params.missingProperty}`;
         break;
-      case "enum":
-        message = `Invalid value. Allowed values: ${error.params?.["allowedValues"]?.join(", ")}`;
+      }
+      case "enum": {
+        const params = error.params as EnumParams;
+        allowedValues = params.allowedValues;
+        message = `Invalid value. Allowed values: ${params.allowedValues.map((v) => String(v)).join(", ")}`;
         break;
-      case "pattern":
+      }
+      case "pattern": {
+        const params = error.params as PatternParams;
         if (error.schemaPath?.includes("ethereumAddress")) {
           message = "Invalid Ethereum address format (must be 0x followed by 40 hex characters)";
         } else if (error.schemaPath?.includes("bigIntString")) {
           message = "Invalid BigInt format (must contain only numeric digits)";
         } else {
-          message = `Value does not match required pattern: ${error.params?.["pattern"]}`;
+          message = `Value does not match required pattern: ${params.pattern}`;
         }
         break;
-      case "minimum":
-        message = `Value must be at least ${error.params?.["limit"]}`;
+      }
+      case "minimum": {
+        const params = error.params as LimitParams;
+        message = `Value must be at least ${params.limit}`;
         break;
-      case "maximum":
-        message = `Value must be at most ${error.params?.["limit"]}`;
+      }
+      case "maximum": {
+        const params = error.params as LimitParams;
+        message = `Value must be at most ${params.limit}`;
         break;
-      case "type":
-        message = `Expected ${error.params?.["type"]} but received ${typeof error.data}`;
+      }
+      case "type": {
+        const params = error.params as TypeParams;
+        message = `Expected ${params.type} but received ${typeof error.data}`;
         break;
-      case "additionalProperties":
-        message = `Unknown field: ${error.params?.["additionalProperty"]}`;
+      }
+      case "additionalProperties": {
+        const params = error.params as AdditionalPropertiesParams;
+        message = `Unknown field: ${params.additionalProperty}`;
         break;
+      }
     }
 
     return {
       field: field.replace(/^\//, "").replace(/\//g, ".") || "root",
       message,
       value: error.data,
-      allowedValues: error.params?.["allowedValues"],
+      ...(allowedValues !== undefined && { allowedValues }),
     };
   });
 }
 
-export function validateToolParameters<T = any>(
+export function validateToolParameters<T = unknown>(
   toolName: string,
   parameters: unknown
 ): ValidationResult<T> {
@@ -106,7 +146,10 @@ export function validateToolParameters<T = any>(
 
   let validate;
   try {
-    validate = ajv.compile(schema as any);
+    validate = ajv.compile({
+      ...schema,
+      $async: false,
+    } as SchemaObject);
   } catch (error) {
     logger.error({ error, toolName, schema }, "Failed to compile schema");
     throw new MCPError(1500, "Schema compilation failed", { toolName, error });
@@ -138,9 +181,10 @@ export function validateToolParameters<T = any>(
   };
 }
 
+// eslint-disable-next-line @typescript-eslint/require-await
 export async function validateMCPToolCall(
   request: CallToolRequest
-): Promise<{ toolName: string; validatedParams: any }> {
+): Promise<{ toolName: string; validatedParams: unknown }> {
   const { name: toolName, arguments: rawParams } = request.params;
 
   logger.debug(

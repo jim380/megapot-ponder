@@ -323,7 +323,7 @@ export function validatePagination(first?: number, skip?: number): void {
 }
 
 export function validateOrderDirection(direction?: string): OrderDirection | undefined {
-  if (!direction) return undefined;
+  if (direction === undefined || direction === null || direction === "") return undefined;
 
   const normalized = direction.toLowerCase();
   if (normalized !== "asc" && normalized !== "desc") {

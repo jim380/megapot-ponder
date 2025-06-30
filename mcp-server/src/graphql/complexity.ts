@@ -6,6 +6,8 @@ import {
   type SelectionNode,
   visit,
   type GraphQLSchema,
+  Kind,
+  OperationTypeNode,
 } from "graphql";
 import { getLogger } from "../logging/index.js";
 
@@ -87,7 +89,7 @@ export function calculateQueryComplexity(
 
   visit(document, {
     OperationDefinition(node) {
-      if (node.operation === "subscription") {
+      if (node.operation === OperationTypeNode.SUBSCRIPTION) {
         result.score += calculateSubscriptionComplexity(node, fragments, mergedConfig);
       } else {
         const operationComplexity = calculateOperationComplexity(node, fragments, mergedConfig);
@@ -98,7 +100,7 @@ export function calculateQueryComplexity(
         result.details.listFields += operationComplexity.listFields;
 
         for (const [field, cost] of Object.entries(operationComplexity.customCosts)) {
-          result.details.customCosts[field] = (result.details.customCosts[field] || 0) + cost;
+          result.details.customCosts[field] = (result.details.customCosts[field] ?? 0) + cost;
         }
       }
     },
@@ -134,7 +136,7 @@ function calculateOperationComplexity(
 
   const hasIntrospection = operation.selectionSet.selections.some(
     (selection) =>
-      selection.kind === "Field" &&
+      selection.kind === Kind.FIELD &&
       (selection.name.value === "__schema" || selection.name.value === "__type")
   );
 
@@ -156,7 +158,7 @@ function calculateOperationComplexity(
   listFields += selectionComplexity.listFields;
 
   for (const [field, cost] of Object.entries(selectionComplexity.customCosts)) {
-    customCosts[field] = (customCosts[field] || 0) + cost;
+    customCosts[field] = (customCosts[field] ?? 0) + cost;
   }
 
   return { score, fieldCount, maxDepth, listFields, customCosts };
@@ -181,19 +183,19 @@ function calculateSelectionSetComplexity(
   const customCosts: Record<string, number> = {};
 
   for (const selection of selections) {
-    if (selection.kind === "Field") {
+    if (selection.kind === Kind.FIELD) {
       fieldCount++;
 
       const fieldName = selection.name.value;
       const hasSelections = selection.selectionSet && selection.selectionSet.selections.length > 0;
 
       let fieldScore = 0;
-      if (config.fieldCosts && config.fieldCosts[fieldName]) {
+      if (config.fieldCosts != null && config.fieldCosts[fieldName] != null) {
         const customCost = config.fieldCosts[fieldName];
         fieldScore = customCost;
-        customCosts[fieldName] = (customCosts[fieldName] || 0) + customCost;
+        customCosts[fieldName] = (customCosts[fieldName] ?? 0) + customCost;
       } else {
-        fieldScore = hasSelections ? config.objectCost : config.scalarCost;
+        fieldScore = hasSelections === true ? config.objectCost : config.scalarCost;
       }
 
       const depthPenalty = fieldScore * (depth - 1) * (config.depthFactor - 1);
@@ -210,7 +212,7 @@ function calculateSelectionSetComplexity(
 
       score += fieldScore;
 
-      if (hasSelections && selection.selectionSet) {
+      if (hasSelections === true && selection.selectionSet != null) {
         const nestedComplexity = calculateSelectionSetComplexity(
           selection.selectionSet.selections,
           fragments,
@@ -224,10 +226,10 @@ function calculateSelectionSetComplexity(
         listFields += nestedComplexity.listFields;
 
         for (const [field, cost] of Object.entries(nestedComplexity.customCosts)) {
-          customCosts[field] = (customCosts[field] || 0) + cost;
+          customCosts[field] = (customCosts[field] ?? 0) + cost;
         }
       }
-    } else if (selection.kind === "FragmentSpread") {
+    } else if (selection.kind === Kind.FRAGMENT_SPREAD) {
       const fragment = fragments.get(selection.name.value);
       if (fragment) {
         const fragmentComplexity = calculateSelectionSetComplexity(
@@ -243,10 +245,10 @@ function calculateSelectionSetComplexity(
         listFields += fragmentComplexity.listFields;
 
         for (const [field, cost] of Object.entries(fragmentComplexity.customCosts)) {
-          customCosts[field] = (customCosts[field] || 0) + cost;
+          customCosts[field] = (customCosts[field] ?? 0) + cost;
         }
       }
-    } else if (selection.kind === "InlineFragment") {
+    } else if (selection.kind === Kind.INLINE_FRAGMENT) {
       const inlineComplexity = calculateSelectionSetComplexity(
         selection.selectionSet.selections,
         fragments,
@@ -260,7 +262,7 @@ function calculateSelectionSetComplexity(
       listFields += inlineComplexity.listFields;
 
       for (const [field, cost] of Object.entries(inlineComplexity.customCosts)) {
-        customCosts[field] = (customCosts[field] || 0) + cost;
+        customCosts[field] = (customCosts[field] ?? 0) + cost;
       }
     }
   }
@@ -289,12 +291,12 @@ function calculateSubscriptionComplexity(
 
 function isListField(field: FieldNode): boolean {
   const fieldName = field.name.value;
-  const hasListArguments = field.arguments?.some(
+  const hasListArguments = field.arguments != null && field.arguments.some(
     (arg) => arg.name.value === "first" || arg.name.value === "last" || arg.name.value === "limit"
   );
 
   return (
-    hasListArguments ||
+    hasListArguments === true ||
     fieldName.endsWith("s") ||
     fieldName.includes("List") ||
     fieldName.includes("leaderboard") ||
@@ -307,7 +309,7 @@ function getListSize(field: FieldNode, defaultSize: number): number {
 
   for (const arg of field.arguments) {
     if (arg.name.value === "first" || arg.name.value === "last" || arg.name.value === "limit") {
-      if (arg.value.kind === "IntValue") {
+      if (arg.value.kind === Kind.INT) {
         return parseInt(arg.value.value, 10);
       }
     }

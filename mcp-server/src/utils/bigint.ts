@@ -27,7 +27,7 @@ export function hexToBigInt(hex: string): bigint {
   return BigInt(`0x${cleanHex}`);
 }
 
-export function serializeBigInt(obj: any): any {
+export function serializeBigInt<T>(obj: T): unknown {
   if (obj === null || obj === undefined) {
     return obj;
   }
@@ -37,12 +37,12 @@ export function serializeBigInt(obj: any): any {
   }
 
   if (Array.isArray(obj)) {
-    return obj.map((item) => serializeBigInt(item));
+    return obj.map((item: unknown) => serializeBigInt(item));
   }
 
   if (typeof obj === "object") {
-    const result: any = {};
-    for (const [key, value] of Object.entries(obj)) {
+    const result: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {
       result[key] = serializeBigInt(value);
     }
     return result;
@@ -51,7 +51,7 @@ export function serializeBigInt(obj: any): any {
   return obj;
 }
 
-export function deserializeBigInt(obj: any, fields?: string[]): any {
+export function deserializeBigInt<T>(obj: T, fields?: string[]): unknown {
   if (obj === null || obj === undefined) {
     return obj;
   }
@@ -65,13 +65,13 @@ export function deserializeBigInt(obj: any, fields?: string[]): any {
   }
 
   if (Array.isArray(obj)) {
-    return obj.map((item) => deserializeBigInt(item, fields));
+    return obj.map((item: unknown) => deserializeBigInt(item, fields));
   }
 
   if (typeof obj === "object") {
-    const result: any = {};
-    for (const [key, value] of Object.entries(obj)) {
-      if (fields && fields.includes(key) && typeof value === "string") {
+    const result: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {
+      if (fields !== undefined && fields.includes(key) && typeof value === "string") {
         try {
           result[key] = hexToBigInt(value);
         } catch {
@@ -103,12 +103,12 @@ export function decimalToBigInt(decimal: string): bigint {
   return BigInt(decimal);
 }
 
-export function stringifyWithBigInt(obj: any, space?: number): string {
+export function stringifyWithBigInt(obj: unknown, space?: number): string {
   return JSON.stringify(serializeBigInt(obj), null, space);
 }
 
-export function parseWithBigInt(json: string, bigIntFields?: string[]): any {
-  const parsed = JSON.parse(json);
+export function parseWithBigInt(json: string, bigIntFields?: string[]): unknown {
+  const parsed: unknown = JSON.parse(json);
   return deserializeBigInt(parsed, bigIntFields);
 }
 
@@ -155,8 +155,8 @@ export const BIGINT_FIELDS = [
   "totalReferralEarnings",
 ];
 
-export function createBigIntReplacer(): (key: string, value: any) => any {
-  return (_key: string, value: any) => {
+export function createBigIntReplacer(): (key: string, value: unknown) => unknown {
+  return (_key: string, value: unknown): unknown => {
     if (typeof value === "bigint") {
       return bigIntToHex(value);
     }
@@ -166,8 +166,8 @@ export function createBigIntReplacer(): (key: string, value: any) => any {
 
 export function createBigIntReviver(
   bigIntFields: string[] = BIGINT_FIELDS
-): (key: string, value: any) => any {
-  return (key: string, value: any) => {
+): (key: string, value: unknown) => unknown {
+  return (key: string, value: unknown): unknown => {
     if (bigIntFields.includes(key) && typeof value === "string" && isHexString(value)) {
       try {
         return hexToBigInt(value);
