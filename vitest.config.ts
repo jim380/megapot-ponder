@@ -6,6 +6,10 @@ export default defineConfig({
     globals: true,
     environment: "node",
     setupFiles: ["./test/setup.ts"],
+    exclude: [
+      "node_modules/**",
+      "mcp-server/**"
+    ],
     coverage: {
       reporter: ["text", "json", "html"],
       exclude: [
